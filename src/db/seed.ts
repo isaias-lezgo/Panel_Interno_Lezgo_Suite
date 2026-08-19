@@ -1,4 +1,7 @@
-import "dotenv/config"
+import { config } from "dotenv"
+
+// Igual que drizzle.config.ts: tsx tampoco lee .env.local solo.
+config({ path: ".env.local" })
 
 import { neon } from "@neondatabase/serverless"
 import { drizzle } from "drizzle-orm/neon-http"

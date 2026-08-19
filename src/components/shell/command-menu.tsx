@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { SearchIcon } from "lucide-react"
 
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -60,37 +61,41 @@ export function CommandMenu({ clients }: { clients: Client[] }) {
         title="Buscar"
         description="Salta a un cliente o a una sección del panel."
       >
-        <CommandInput placeholder="Escribe el nombre de un cliente o una sección…" />
-        <CommandList>
-          <CommandEmpty>No hay coincidencias.</CommandEmpty>
-          <CommandGroup heading="Ir a">
-            {flatNav.map((item) => (
-              <CommandItem
-                key={item.href}
-                value={item.title}
-                onSelect={() => go(item.href)}
-              >
-                <item.icon className="size-4" />
-                {item.title}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-          <CommandSeparator />
-          <CommandGroup heading="Clientes">
-            {clients.map((client) => (
-              <CommandItem
-                key={client.id}
-                value={`${client.name} ${client.industry}`}
-                onSelect={() => go(`/clientes/${client.slug}`)}
-              >
-                <span>{client.name}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {client.industry}
-                </span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        </CommandList>
+        {/* CommandDialog sólo aporta el diálogo: el contexto de cmdk lo tiene
+            <Command>, y sin él CommandInput no encuentra su store. */}
+        <Command>
+          <CommandInput placeholder="Escribe el nombre de un cliente o una sección…" />
+          <CommandList>
+            <CommandEmpty>No hay coincidencias.</CommandEmpty>
+            <CommandGroup heading="Ir a">
+              {flatNav.map((item) => (
+                <CommandItem
+                  key={item.href}
+                  value={item.title}
+                  onSelect={() => go(item.href)}
+                >
+                  <item.icon className="size-4" />
+                  {item.title}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+            <CommandGroup heading="Clientes">
+              {clients.map((client) => (
+                <CommandItem
+                  key={client.id}
+                  value={`${client.name} ${client.industry}`}
+                  onSelect={() => go(`/clientes/${client.slug}`)}
+                >
+                  <span>{client.name}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {client.industry}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </CommandDialog>
     </>
   )

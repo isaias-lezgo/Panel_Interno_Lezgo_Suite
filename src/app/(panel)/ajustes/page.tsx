@@ -112,20 +112,39 @@ export default async function AjustesPage() {
               <code className="num text-xs">DATABASE_URL</code> esté vacía, y
               consulta Neon en cuanto la definas.
             </p>
-            <ol className="space-y-1.5 text-muted-foreground">
-              <li>
-                1. Crea una rama en Neon y copia su cadena de conexión a{" "}
-                <code className="num text-xs">.env.local</code>.
-              </li>
-              <li>
-                2. Genera y aplica el esquema con{" "}
-                <code className="num text-xs">pnpm db:push</code>.
-              </li>
-              <li>
-                3. Carga los datos de ejemplo con{" "}
-                <code className="num text-xs">pnpm db:seed</code>.
-              </li>
-            </ol>
+
+            {hasDatabase ? (
+              <ul className="space-y-1.5 text-muted-foreground">
+                <li>
+                  El panel está leyendo de Postgres. Para volver a cargar los
+                  datos de ejemplo: <code className="num text-xs">pnpm db:seed</code>.
+                </li>
+                <li>
+                  Después de tocar{" "}
+                  <code className="num text-xs">src/db/schema.ts</code>, aplica
+                  el cambio con <code className="num text-xs">pnpm db:push</code>.
+                </li>
+                <li>
+                  Para inspeccionar las tablas:{" "}
+                  <code className="num text-xs">pnpm db:studio</code>.
+                </li>
+              </ul>
+            ) : (
+              <ol className="space-y-1.5 text-muted-foreground">
+                <li>
+                  1. Crea una rama en Neon y copia su cadena de conexión a{" "}
+                  <code className="num text-xs">.env.local</code>.
+                </li>
+                <li>
+                  2. Genera y aplica el esquema con{" "}
+                  <code className="num text-xs">pnpm db:push</code>.
+                </li>
+                <li>
+                  3. Carga los datos de ejemplo con{" "}
+                  <code className="num text-xs">pnpm db:seed</code>.
+                </li>
+              </ol>
+            )}
           </div>
         </Instrument>
 

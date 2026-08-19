@@ -4,6 +4,12 @@ import { TopBar } from "@/components/shell/top-bar"
 import { ghl } from "@/lib/ghl/client"
 import { listClients } from "@/lib/repository"
 
+/**
+ * Un panel de operaciones no puede servir cifras congeladas en el build:
+ * cada vista se renderiza por petición contra Neon y GoHighLevel.
+ */
+export const dynamic = "force-dynamic"
+
 export default async function PanelLayout({
   children,
 }: {
