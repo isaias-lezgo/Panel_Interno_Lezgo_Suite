@@ -13,6 +13,7 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { Markdown } from "@/components/ai/markdown"
 import { toolLabel } from "@/components/ai/tool-labels"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -117,13 +118,15 @@ export function CopilotChat() {
                 <div className="min-w-0 flex-1 space-y-3">
                   {message.parts.map((part, index) => {
                     if (part.type === "text") {
-                      return (
+                      return message.role === "user" ? (
                         <p
                           key={index}
                           className="text-sm leading-relaxed whitespace-pre-wrap"
                         >
                           {part.text}
                         </p>
+                      ) : (
+                        <Markdown key={index}>{part.text}</Markdown>
                       )
                     }
 
