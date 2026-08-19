@@ -25,11 +25,11 @@ const data = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Lezgo Suite — Agency Control Panel",
+    default: "Lezgo Suite — Panel interno",
     template: "%s · Lezgo Suite",
   },
   description:
-    "Run every client account, implementation, and invoice for a white-labeled GoHighLevel practice from one console.",
+    "Gestiona clientes, implementaciones y facturación de una agencia que revende GoHighLevel en marca blanca, desde una sola consola.",
 }
 
 export default function RootLayout({
@@ -37,7 +37,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
-      lang="en"
+      lang="es"
       suppressHydrationWarning
       className={`${display.variable} ${body.variable} ${data.variable}`}
     >

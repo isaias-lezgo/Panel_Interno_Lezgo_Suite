@@ -17,7 +17,7 @@ export default async function PanelLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
           clients={clients}
-          operator={{ name: "Isaias Rios", role: "Founder" }}
+          operator={{ name: "Isaias Rios", role: "Fundador" }}
         />
         <MobileNav />
         <main className="flex-1">{children}</main>
