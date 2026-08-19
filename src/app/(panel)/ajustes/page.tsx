@@ -3,7 +3,7 @@ import { CheckIcon, MinusIcon } from "lucide-react"
 import { Instrument, PageHeader } from "@/components/panel/page-header"
 import { toolLabels } from "@/components/ai/tool-labels"
 import { ThemeToggle } from "@/components/shell/theme-toggle"
-import { COPILOT_MODEL } from "@/lib/ai/agent"
+import { COPILOT_MODEL, usingDirectAnthropic } from "@/lib/ai/agent"
 import { hasDatabase } from "@/db"
 import { ghl } from "@/lib/ghl/client"
 import { listClients } from "@/lib/repository"
@@ -37,10 +37,15 @@ export default async function AjustesPage() {
         : "El panel usa datos de ejemplo hasta que definas la variable.",
     },
     {
-      name: "AI Gateway",
-      variable: "AI_GATEWAY_API_KEY",
-      ready: Boolean(process.env.AI_GATEWAY_API_KEY),
-      detail: `Da acceso al modelo ${COPILOT_MODEL}.`,
+      name: "Modelo del copiloto",
+      variable: usingDirectAnthropic
+        ? "ANTHROPIC_API_KEY"
+        : "AI_GATEWAY_API_KEY",
+      ready:
+        usingDirectAnthropic || Boolean(process.env.AI_GATEWAY_API_KEY),
+      detail: usingDirectAnthropic
+        ? `${COPILOT_MODEL} directo desde la API de Anthropic, sin pasar por el AI Gateway.`
+        : `${COPILOT_MODEL} vía AI Gateway. Los créditos gratis no alcanzan: hace falta comprar créditos, o poner ANTHROPIC_API_KEY para ir directo.`,
     },
     {
       name: "Subcuenta por defecto",

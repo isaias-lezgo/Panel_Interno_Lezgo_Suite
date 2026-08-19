@@ -90,6 +90,12 @@ tipos. Detalles ya verificados contra la API real:
 - `GET /opportunities/search` usa `pipelineId` en camelCase.
 - Al eliminar, la API responde `succeded` (así, con la errata).
 
+**Modelo.** `src/lib/ai/agent.ts` resuelve el modelo por dos caminos: con
+`ANTHROPIC_API_KEY` habla directo con Anthropic; sin ella usa el AI Gateway con
+el identificador `proveedor/modelo`. Los créditos **gratis** del Gateway no
+sirven — devuelven "Free tier users do not have access to this model" incluso
+con tarjeta registrada; hay que comprar créditos.
+
 **Copiloto.** Las herramientas viven en `src/lib/ai/tools.ts` y nunca lanzan:
 envuelven el error de GHL en `{ ok: false, error }` para que el modelo pueda
 razonar sobre el fallo. Lo destructivo o lo que sale hacia un cliente
@@ -138,7 +144,9 @@ devuelven un error explicado en la interfaz.
 | `DATABASE_URL` | Rama de Neon de **este** proyecto |
 | `GHL_API_KEY` | Token de agencia de GoHighLevel |
 | `GHL_LOCATION_ID` | Subcuenta por defecto |
-| `AI_GATEWAY_API_KEY` | Modelo del copiloto vía Vercel AI Gateway |
+| `ANTHROPIC_API_KEY` | Modelo del copiloto, directo a la API de Anthropic |
+| `AI_GATEWAY_API_KEY` | Alternativa: modelo vía Vercel AI Gateway (requiere créditos comprados) |
+| `COPILOT_MODEL` | Sobrescribe el modelo por defecto |
 
 ## Cuidados
 

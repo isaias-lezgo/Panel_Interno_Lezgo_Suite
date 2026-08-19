@@ -58,6 +58,18 @@ El cliente tipado vive en `src/lib/ghl/client.ts` y cubre contactos,
 oportunidades, pipelines, subcuentas, automatizaciones, calendarios y envío de
 mensajes, con `ghl.request()` como escape para lo que falte.
 
+## El modelo del copiloto
+
+Define **una** de estas dos en `.env.local`:
+
+- `ANTHROPIC_API_KEY` — va directo a la API de Anthropic. Es el camino más
+  corto y no depende de la facturación de Vercel.
+- `AI_GATEWAY_API_KEY` — pasa por Vercel AI Gateway. Ojo: los créditos gratis
+  no dan acceso a los modelos aunque haya tarjeta registrada; hay que comprar
+  créditos en `vercel.com/[equipo]/~/ai`.
+
+`COPILOT_MODEL` cambia el modelo sin tocar código.
+
 ## El copiloto
 
 Usa el AI SDK con un `ToolLoopAgent` y 19 herramientas: cuatro leen la cartera
