@@ -1,0 +1,238 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   Lezgo Suite — "Pit Wall" design tokens
+   A telemetry console for an agency running many client accounts
+   at speed. Ink + porcelain ground, one signal orange, one flux
+   teal. Numbers are always mono and tabular.
+   ============================================================ */
+
+:root {
+  --radius: 0.5rem;
+
+  /* surfaces */
+  --background: #eef1f0;
+  --foreground: #0f1418;
+  --card: #ffffff;
+  --card-foreground: #0f1418;
+  --popover: #ffffff;
+  --popover-foreground: #0f1418;
+
+  /* brand */
+  --primary: #e8541b;
+  --primary-foreground: #ffffff;
+  --flux: #00898a;
+  --flux-foreground: #ffffff;
+
+  /* neutrals */
+  --secondary: #e3e7e6;
+  --secondary-foreground: #0f1418;
+  --muted: #e7eae9;
+  --muted-foreground: #59646b;
+  --accent: #e3e7e6;
+  --accent-foreground: #0f1418;
+  --destructive: #c2385e;
+  --destructive-foreground: #ffffff;
+  --border: #d6dbda;
+  --input: #d6dbda;
+  --ring: #e8541b;
+
+  /* status — always paired with a label or icon, never colour alone */
+  --status-live: #00898a;
+  --status-build: #4c63c9;
+  --status-warn: #a3730a;
+  --status-risk: #c2385e;
+  --status-idle: #7b868c;
+
+  /* chart series — fixed order, never cycled.
+     Validated: lightness band, chroma floor, CVD separation,
+     normal-vision floor, contrast vs #ffffff. */
+  --chart-1: #e8541b;
+  --chart-2: #00a3a3;
+  --chart-3: #4c63c9;
+  --chart-4: #c08a0a;
+  --chart-5: #c2385e;
+
+  /* instrument details */
+  --grid-line: #dfe4e3;
+  --rail: #f6f8f7;
+  --rail-foreground: #0f1418;
+}
+
+.dark {
+  --background: #0a0e11;
+  --foreground: #e6ecee;
+  --card: #11171b;
+  --card-foreground: #e6ecee;
+  --popover: #151c21;
+  --popover-foreground: #e6ecee;
+
+  --primary: #ff6a33;
+  --primary-foreground: #170701;
+  --flux: #17b5b0;
+  --flux-foreground: #041312;
+
+  --secondary: #1a2229;
+  --secondary-foreground: #e6ecee;
+  --muted: #161d22;
+  --muted-foreground: #8b979e;
+  --accent: #1a2229;
+  --accent-foreground: #e6ecee;
+  --destructive: #e0668a;
+  --destructive-foreground: #1b0810;
+  --border: #212a30;
+  --input: #212a30;
+  --ring: #ff6a33;
+
+  --status-live: #17b5b0;
+  --status-build: #7f93e6;
+  --status-warn: #d0a02a;
+  --status-risk: #e0668a;
+  --status-idle: #6f7b83;
+
+  /* dark series — separately chosen and validated against #11171b,
+     not a flip of the light set. */
+  --chart-1: #de642f;
+  --chart-2: #0fa39e;
+  --chart-3: #6b80de;
+  --chart-4: #b58712;
+  --chart-5: #d9557c;
+
+  --grid-line: #1b2429;
+  --rail: #0d1215;
+  --rail-foreground: #e6ecee;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-flux: var(--flux);
+  --color-flux-foreground: var(--flux-foreground);
+  --color-rail: var(--rail);
+  --color-rail-foreground: var(--rail-foreground);
+  --color-grid-line: var(--grid-line);
+
+  --color-status-live: var(--status-live);
+  --color-status-build: var(--status-build);
+  --color-status-warn: var(--status-warn);
+  --color-status-risk: var(--status-risk);
+  --color-status-idle: var(--status-idle);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-xs: calc(var(--radius) * 0.5);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: calc(var(--radius) * 0.875);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-data), ui-monospace, "SFMono-Regular", monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "cv05" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Every number in this product is tabular. Columns of figures that
+     jitter between renders are unreadable at a glance. */
+  .num,
+  th[data-num],
+  td[data-num] {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 26%, transparent);
+  }
+}
+
+@layer components {
+  /* Micro-caps label. Used for every instrument label in the panel so
+     data and its name never compete for the same visual weight. */
+  .eyebrow {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .display {
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+  }
+
+  /* Blueprint ground: a 32px hairline grid that only reads as texture,
+     never as content. Sits behind the shell, not inside cards. */
+  .blueprint {
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
+  }
+
+  .hairline-t {
+    box-shadow: inset 0 1px 0 var(--border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
