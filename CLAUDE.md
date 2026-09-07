@@ -90,6 +90,29 @@ tipos. Detalles ya verificados contra la API real:
 - `GET /opportunities/search` usa `pipelineId` en camelCase.
 - Al eliminar, la API responde `succeded` (así, con la errata).
 
+**Stripe.** Toda llamada pasa por `src/lib/stripe/client.ts`, y es **solo
+lectura**: el panel no cobra ni emite. Detalles verificados contra la cuenta
+real (`acct_1LKAgaLSMWyOIdkA`):
+
+- Los importes vienen en **centavos**: `539700` es $5,397.00.
+- Conviven **MXN y USD**. La moneda base sigue a la fuente: con Stripe el
+  panel suma en MXN; sin él, en USD. Las facturas en USD se convierten con
+  `STRIPE_FX_USD_MXN`; sin esa variable se muestran pero quedan fuera de los
+  totales. **Nunca inventes un tipo de cambio.**
+- En `es-MX` el símbolo estrecho de MXN y el de USD son ambos `$`. Usa
+  `moneySigned` donde puedan convivir monedas, o dos importes distintos se
+  verán idénticos.
+- `due_date` es `null` en cobro automático. "Vencida" se deduce de
+  `attempt_count > 0 && next_payment_attempt === null`.
+- Los estados `void` y `uncollectible` existen y **no** cuentan como por
+  cobrar.
+- El concepto sale de la línea de **mayor importe**, no de `lines.data[0]`:
+  Stripe a veces devuelve primero la línea del IVA.
+- Los precios los creó GoHighLevel (`price.metadata.created_by =
+  "LeadConnector"`), pero el `location_id` de ahí es el de la agencia, no el
+  de cada cliente: **no sirve para mapear**. El enlace vive en
+  `clients.stripe_customer_id` y se llena con `pnpm stripe:map`.
+
 **Modelo.** `src/lib/ai/agent.ts` resuelve el modelo por dos caminos: con
 `ANTHROPIC_API_KEY` habla directo con Anthropic; sin ella usa el AI Gateway con
 el identificador `proveedor/modelo`. Los créditos **gratis** del Gateway no
@@ -108,6 +131,8 @@ consola de telemetría. Reglas que no se rompen:
 
 - Toda cifra usa la clase `.num` (JetBrains Mono, tabular). Las columnas de
   números no deben bailar entre renders.
+- Toda cifra de dinero lleva moneda explícita: `money(cents, currency)`. Una
+  cifra convertida se declara como tal al pie del instrumento.
 - Las etiquetas de instrumento usan `.eyebrow` (versalitas mono).
 - El estado nunca se comunica solo con color: `StatusChip` siempre lleva punto
   **y** palabra.
@@ -131,6 +156,8 @@ pnpm lint         # eslint
 pnpm db:push      # aplica el esquema a Neon
 pnpm db:seed      # carga src/data/demo.ts en Neon
 pnpm db:studio    # explorador de Drizzle
+pnpm test         # vitest: pruebas del mapeador de Stripe
+pnpm stripe:map   # propone enlaces cus_… ↔ cliente
 ```
 
 ## Variables de entorno
@@ -147,6 +174,8 @@ devuelven un error explicado en la interfaz.
 | `ANTHROPIC_API_KEY` | Modelo del copiloto, directo a la API de Anthropic |
 | `AI_GATEWAY_API_KEY` | Alternativa: modelo vía Vercel AI Gateway (requiere créditos comprados) |
 | `COPILOT_MODEL` | Sobrescribe el modelo por defecto |
+| `STRIPE_SECRET_KEY` | Clave de Stripe. Sin ella, facturación sigue en Neon/demo |
+| `STRIPE_FX_USD_MXN` | Tipo de cambio USD→MXN para normalizar los KPI |
 
 ## Cuidados
 
