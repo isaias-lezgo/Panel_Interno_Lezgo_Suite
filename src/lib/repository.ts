@@ -1,9 +1,12 @@
 import "server-only"
 
+import { unstable_cache, updateTag } from "next/cache"
 import { desc, eq } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
+import { listRecentInvoices, stripeEnabled } from "@/lib/stripe/client"
+import { mapInvoice } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
   Client,
@@ -82,7 +85,10 @@ export function rowToInvoice(
   }
 }
 
-export async function listInvoices(): Promise<Invoice[]> {
+async function neonInvoices(): Promise<{
+  invoices: Invoice[]
+  source: "neon" | "demo"
+}> {
   const [rows, clients] = await Promise.all([
     db
       ? (db.select().from(schema.invoices) as Promise<InvoiceRow[]>)
@@ -92,14 +98,92 @@ export async function listInvoices(): Promise<Invoice[]> {
   const nameById = new Map(clients.map((c) => [c.id, c.name]))
   const base = baseCurrency()
   const fx = usdToMxnRate()
-  return rows.map((row) =>
-    rowToInvoice(
-      row,
-      nameById.get(row.clientId) ?? "Cliente desconocido",
-      base,
-      fx,
+  return {
+    invoices: rows.map((row) =>
+      rowToInvoice(
+        row,
+        nameById.get(row.clientId) ?? "Cliente desconocido",
+        base,
+        fx,
+      ),
     ),
-  )
+    source: db ? "neon" : "demo",
+  }
+}
+
+/**
+ * Cinco minutos es el trato: suficiente para que el equipo refresque la vista
+ * sin gastar cuota, poco para que nadie tome una decisión de cobranza con
+ * datos de ayer. El botón "Actualizar" invalida el tag cuando urge.
+ *
+ * Los pares llegan como argumento —y no se leen adentro— porque
+ * `unstable_cache` construye la llave con los argumentos: si cambia el mapeo
+ * de clientes, la entrada vieja deja de usarse sola.
+ */
+const cachedStripeInvoices = unstable_cache(
+  async (usdToMxn: number | null, pares: [string, string][]) => {
+    const byCustomer = new Map(pares)
+    const raw = await listRecentInvoices(12)
+    return raw
+      .map((invoice) =>
+        mapInvoice(invoice, usdToMxn, (cus) =>
+          cus ? (byCustomer.get(cus) ?? null) : null,
+        ),
+      )
+      .filter((i): i is Invoice => i !== null)
+  },
+  ["stripe-invoices"],
+  { revalidate: 300, tags: ["stripe"] },
+)
+
+/**
+ * Un panel de operaciones que se cae entero porque un proveedor tuvo un mal
+ * minuto no sirve. Si Stripe falla, se sirve lo que haya en Neon y la vista
+ * avisa que las cifras no están frescas.
+ */
+export async function getBillingFeed() {
+  const usdToMxn = usdToMxnRate()
+  const base = baseCurrency()
+
+  if (!stripeEnabled()) {
+    const { invoices, source } = await neonInvoices()
+    return { invoices, source, stale: false, usdToMxn, baseCurrency: base }
+  }
+
+  const clients = await listClients()
+  const pares = clients
+    .filter((c) => c.stripeCustomerId)
+    .map((c) => [c.stripeCustomerId as string, c.id] as [string, string])
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  try {
+    const invoices = await cachedStripeInvoices(usdToMxn, pares)
+    return {
+      invoices,
+      source: "stripe" as const,
+      stale: false,
+      usdToMxn,
+      baseCurrency: base,
+    }
+  } catch (error) {
+    console.error("Stripe no respondió; se sirve Neon", error)
+    const { invoices, source } = await neonInvoices()
+    return { invoices, source, stale: true, usdToMxn, baseCurrency: base }
+  }
+}
+
+export async function listInvoices(): Promise<Invoice[]> {
+  return (await getBillingFeed()).invoices
+}
+
+/**
+ * `updateTag` y no `revalidateTag`: dentro de una Server Action es el que da
+ * semántica de leer-lo-que-acabas-de-escribir, así que quien aprieta
+ * "Actualizar" ve datos frescos en esa misma respuesta.
+ */
+export async function refreshBilling() {
+  "use server"
+  updateTag("stripe")
 }
 
 export async function listActivity(limit = 10): Promise<ActivityEvent[]> {
