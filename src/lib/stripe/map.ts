@@ -42,6 +42,20 @@ export function deriveStatus(
   }
 }
 
+/**
+ * El concepto que se muestra. Stripe puede devolver la línea del IVA primero,
+ * así que tomar `data[0]` dejaba facturas rotuladas "IVA" en vez del plan
+ * contratado. La línea de mayor importe es el producto real.
+ */
+function mainLineDescription(invoice: Stripe.Invoice): string | null {
+  let best: Stripe.InvoiceLineItem | null = null
+  for (const line of invoice.lines.data) {
+    if (!line.description) continue
+    if (!best || line.amount > best.amount) best = line
+  }
+  return best?.description ?? null
+}
+
 export function toMxn(
   amount: number,
   currency: Currency,
@@ -85,10 +99,7 @@ export function mapInvoice(
     issuedAt: isoDate(invoice.status_transitions.finalized_at ?? invoice.created),
     dueAt: invoice.due_date ? isoDate(invoice.due_date) : null,
     ...(paidAt ? { paidAt: isoDate(paidAt) } : {}),
-    memo:
-      invoice.lines.data[0]?.description ??
-      invoice.description ??
-      "Sin concepto",
+    memo: mainLineDescription(invoice) ?? invoice.description ?? "Sin concepto",
     ...(invoice.hosted_invoice_url
       ? { hostedUrl: invoice.hosted_invoice_url }
       : {}),

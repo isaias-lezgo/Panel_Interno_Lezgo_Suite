@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { money, relativeDays, shortDate } from "@/lib/format"
+import { money, moneySigned, relativeDays, shortDate } from "@/lib/format"
 import type { Client, Currency, Invoice, InvoiceStatus } from "@/lib/types"
 
 const statusFilterLabel: Record<string, string> = {
@@ -115,7 +115,18 @@ export function InvoicesTable({
                 return (
                   <TableRow key={invoice.id}>
                     <TableCell data-num className="text-xs">
-                      {invoice.number}
+                      {invoice.hostedUrl ? (
+                        <a
+                          href={invoice.hostedUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-primary"
+                        >
+                          {invoice.number}
+                        </a>
+                      ) : (
+                        invoice.number
+                      )}
                     </TableCell>
                     <TableCell>
                       {client ? (
@@ -138,7 +149,7 @@ export function InvoicesTable({
                       <StatusChip tone={state.tone}>{state.label}</StatusChip>
                     </TableCell>
                     <TableCell data-num className="text-right">
-                      {money(invoice.amount, invoice.currency)}
+                      {moneySigned(invoice.amount, invoice.currency, baseCurrency)}
                     </TableCell>
                     <TableCell className="text-xs whitespace-nowrap">
                       {shortDate(invoice.issuedAt)}

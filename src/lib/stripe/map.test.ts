@@ -22,7 +22,7 @@ function factura(over: Record<string, unknown> = {}) {
     next_payment_attempt: null,
     hosted_invoice_url: "https://invoice.stripe.com/i/test",
     description: "¡Gracias por confiar en nosotros!",
-    lines: { data: [{ description: "1 × Lezgo Pro MXN" }] },
+    lines: { data: [{ description: "1 × Lezgo Pro MXN", amount: 539_700 }] },
     status_transitions: { finalized_at: 1_788_722_573, paid_at: 1_788_722_573 },
     ...over,
   } as unknown as Stripe.Invoice
@@ -109,6 +109,24 @@ describe("mapInvoice", () => {
   test("usa el concepto de la primera línea, no el agradecimiento", () => {
     const i = mapInvoice(factura(), 18.5, () => null)
     expect(i?.memo).toBe("1 × Lezgo Pro MXN")
+  })
+
+  test("GLE-0229: ignora la línea de IVA y toma el producto real", () => {
+    // Stripe puede devolver la línea de impuesto primero. Tomar `data[0]`
+    // dejaba facturas con el concepto "IVA" en vez del plan contratado.
+    const i = mapInvoice(
+      factura({
+        lines: {
+          data: [
+            { description: "IVA", amount: 56_432 },
+            { description: "1 × Lezgo Growth MXN", amount: 352_700 },
+          ],
+        },
+      }),
+      18.5,
+      () => null,
+    )
+    expect(i?.memo).toBe("1 × Lezgo Growth MXN")
   })
 
   test("sin mapeo, clientId es null y queda el nombre de Stripe", () => {

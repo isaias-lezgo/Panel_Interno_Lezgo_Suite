@@ -29,6 +29,34 @@ export const money = (cents: number, currency: Currency) =>
 export const moneyExact = (cents: number, currency: Currency) =>
   formatter(currency, true).format(cents / 100)
 
+const tagged = new Map<string, Intl.NumberFormat>()
+
+/**
+ * Como `money`, pero rotula la moneda cuando no es la que suma el panel. En
+ * `es-MX` el símbolo estrecho de MXN y el de USD son ambos "$": una factura de
+ * $240 USD y otra de $240 MXN se veían idénticas en la misma columna. La
+ * mayoría queda limpia; solo la excepción se anuncia.
+ */
+export const moneySigned = (
+  cents: number,
+  currency: Currency,
+  base: Currency,
+) => {
+  if (currency === base) return money(cents, currency)
+  const key = currency
+  let f = tagged.get(key)
+  if (!f) {
+    f = new Intl.NumberFormat(LOCALE, {
+      style: "currency",
+      currency: currency.toUpperCase(),
+      currencyDisplay: "symbol",
+      maximumFractionDigits: 0,
+    })
+    tagged.set(key, f)
+  }
+  return f.format(cents / 100)
+}
+
 /** Para ejes de gráfica. Siempre MXN. */
 export const compactMoney = (cents: number) => {
   const n = cents / 100
