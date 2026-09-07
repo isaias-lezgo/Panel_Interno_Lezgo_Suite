@@ -19,8 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { money, relativeDays, shortDate } from "@/lib/format"
-import type { Client, Invoice, InvoiceStatus } from "@/lib/types"
+import { money, moneySigned, relativeDays, shortDate } from "@/lib/format"
+import type { Client, Currency, Invoice, InvoiceStatus } from "@/lib/types"
 
 const statusFilterLabel: Record<string, string> = {
   todas: "Todas las facturas",
@@ -28,14 +28,18 @@ const statusFilterLabel: Record<string, string> = {
   due: "Por vencer",
   paid: "Pagadas",
   draft: "Borradores",
+  void: "Anuladas",
+  uncollectible: "Incobrables",
 }
 
 export function InvoicesTable({
   invoices,
   clients,
+  baseCurrency,
 }: {
   invoices: Invoice[]
   clients: Client[]
+  baseCurrency: Currency
 }) {
   const [status, setStatus] = useState<InvoiceStatus | "todas">("todas")
 
@@ -48,7 +52,7 @@ export function InvoicesTable({
     .filter((i) => status === "todas" || i.status === status)
     .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))
 
-  const total = rows.reduce((sum, i) => sum + i.amount, 0)
+  const total = rows.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
 
   return (
     <div>
@@ -74,11 +78,13 @@ export function InvoicesTable({
             <SelectItem value="due">Por vencer</SelectItem>
             <SelectItem value="paid">Pagadas</SelectItem>
             <SelectItem value="draft">Borradores</SelectItem>
+            <SelectItem value="void">Anuladas</SelectItem>
+            <SelectItem value="uncollectible">Incobrables</SelectItem>
           </SelectContent>
         </Select>
 
         <span className="num ml-auto text-xs text-muted-foreground">
-          {rows.length} facturas · {money(total)}
+          {rows.length} facturas · {money(total, baseCurrency)}
         </span>
       </div>
 
@@ -102,12 +108,25 @@ export function InvoicesTable({
             </TableHeader>
             <TableBody>
               {rows.map((invoice) => {
-                const client = clientById.get(invoice.clientId)
+                const client = invoice.clientId
+                  ? clientById.get(invoice.clientId)
+                  : undefined
                 const state = invoiceStatusLabel[invoice.status]
                 return (
                   <TableRow key={invoice.id}>
                     <TableCell data-num className="text-xs">
-                      {invoice.number}
+                      {invoice.hostedUrl ? (
+                        <a
+                          href={invoice.hostedUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-primary"
+                        >
+                          {invoice.number}
+                        </a>
+                      ) : (
+                        invoice.number
+                      )}
                     </TableCell>
                     <TableCell>
                       {client ? (
@@ -118,7 +137,9 @@ export function InvoicesTable({
                           {client.name}
                         </Link>
                       ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
+                        <span className="text-sm text-muted-foreground">
+                          {invoice.customerName}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -128,14 +149,14 @@ export function InvoicesTable({
                       <StatusChip tone={state.tone}>{state.label}</StatusChip>
                     </TableCell>
                     <TableCell data-num className="text-right">
-                      {money(invoice.amount)}
+                      {moneySigned(invoice.amount, invoice.currency, baseCurrency)}
                     </TableCell>
                     <TableCell className="text-xs whitespace-nowrap">
                       {shortDate(invoice.issuedAt)}
                     </TableCell>
                     <TableCell className="text-xs whitespace-nowrap">
-                      {shortDate(invoice.dueAt)}
-                      {invoice.status === "overdue" && (
+                      {invoice.dueAt ? shortDate(invoice.dueAt) : "—"}
+                      {invoice.status === "overdue" && invoice.dueAt && (
                         <span className="block text-status-risk">
                           {relativeDays(invoice.dueAt)}
                         </span>

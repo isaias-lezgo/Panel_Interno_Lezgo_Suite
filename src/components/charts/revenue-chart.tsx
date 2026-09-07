@@ -39,14 +39,14 @@ export function RevenueChart({ data }: { data: RevenuePoint[] }) {
           axisLine={false}
           width={44}
           tickMargin={4}
-          tickFormatter={(value: number) => compactMoney(value)}
+          tickFormatter={(value: number) => compactMoney(value * 100)}
           className="text-[11px]"
         />
         <ChartTooltip
           cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
           content={
             <ChartTooltipContent
-              formatter={(value) => compactMoney(Number(value))}
+              formatter={(value) => compactMoney(Number(value) * 100)}
             />
           }
         />

@@ -64,7 +64,7 @@ export default async function ClientePage({
   const state = clientStatusLabel[client.status]
   const owed = bills
     .filter((i) => i.status === "due" || i.status === "overdue")
-    .reduce((sum, i) => sum + i.amount, 0)
+    .reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
 
   return (
     <div className="blueprint">
@@ -108,7 +108,7 @@ export default async function ClientePage({
           </Fact>
           <Fact label="MRR">
             <span className="num text-xl font-semibold">
-              {money(client.mrr)}
+              {money(client.mrr * 100, "usd")}
             </span>
           </Fact>
           <Fact label="Salud">
@@ -183,7 +183,7 @@ export default async function ClientePage({
 
           <Instrument
             label="Facturación"
-            hint={owed > 0 ? `${money(owed)} pendiente` : "Sin saldo pendiente"}
+            hint={owed > 0 ? `${money(owed, "mxn")} pendiente` : "Sin saldo pendiente"}
           >
             {bills.length === 0 ? (
               <EmptyState title="Sin facturas" />
@@ -214,10 +214,10 @@ export default async function ClientePage({
                           </StatusChip>
                         </TableCell>
                         <TableCell data-num className="text-right">
-                          {money(invoice.amount)}
+                          {money(invoice.amount, invoice.currency)}
                         </TableCell>
                         <TableCell className="text-xs whitespace-nowrap">
-                          {shortDate(invoice.dueAt)}
+                          {invoice.dueAt ? shortDate(invoice.dueAt) : "—"}
                         </TableCell>
                       </TableRow>
                     )

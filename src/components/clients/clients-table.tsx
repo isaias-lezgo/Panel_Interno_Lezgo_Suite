@@ -167,7 +167,7 @@ export function ClientsTable({ clients }: { clients: Client[] }) {
                       {planLabel[client.plan]}
                     </TableCell>
                     <TableCell data-num className="text-right">
-                      {money(client.mrr)}
+                      {money(client.mrr * 100, "usd")}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">

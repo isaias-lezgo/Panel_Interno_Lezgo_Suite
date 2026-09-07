@@ -15,6 +15,8 @@ export type Client = {
   mrr: number
   /** GoHighLevel sub-account this client maps to. */
   ghlLocationId: string
+  /** Cliente de Stripe que paga esta cuenta. Se llena con `pnpm stripe:map`. */
+  stripeCustomerId?: string
   /** Account manager on our side. */
   owner: string
   seats: number
@@ -54,18 +56,59 @@ export type Implementation = {
   blockedReason?: string
 }
 
-export type InvoiceStatus = "paid" | "due" | "overdue" | "draft"
+export type Currency = "mxn" | "usd"
 
-export type Invoice = {
+export type InvoiceStatus =
+  | "paid"
+  | "due"
+  | "overdue"
+  | "draft"
+  | "void"
+  | "uncollectible"
+
+/**
+ * La factura tal como vive en la tabla `invoices` de Neon y en los datos de
+ * ejemplo: dólares enteros, siempre ligada a un cliente. Esa tabla no se
+ * migró; el repositorio la adapta a `Invoice` en memoria.
+ */
+export type InvoiceRow = {
   id: string
   number: string
   clientId: string
   amount: number
-  status: InvoiceStatus
+  status: "paid" | "due" | "overdue" | "draft"
   issuedAt: string
   dueAt: string
   paidAt?: string
   memo: string
+}
+
+export type Invoice = {
+  /** Id de Stripe (`in_...`) cuando la factura viene de Stripe. */
+  id: string
+  number: string
+  /** `null` mientras no exista mapeo con un cliente del panel. */
+  clientId: string | null
+  /** Nombre a mostrar cuando `clientId` es `null`. */
+  customerName: string
+  /** Importe total, en centavos de `currency`. Ya incluye IVA. */
+  amount: number
+  currency: Currency
+  /**
+   * Centavos convertidos a la moneda base del panel: lo que suman los KPI.
+   * `null` cuando la conversión no es posible porque falta
+   * `STRIPE_FX_USD_MXN`: la factura se muestra, pero no entra en ningún
+   * total. Nunca se inventa un tipo de cambio para rellenarlo.
+   */
+  amountBase: number | null
+  status: InvoiceStatus
+  issuedAt: string
+  /** `null` en cobro automático, donde Stripe no fija vencimiento. */
+  dueAt: string | null
+  paidAt?: string
+  memo: string
+  /** Abre la factura real en Stripe. */
+  hostedUrl?: string
 }
 
 export type ActivityKind =

@@ -2,6 +2,7 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react"
 
 import { SignalMeter, toneForHealth } from "@/components/signal/signal-meter"
 import { money, percent } from "@/lib/format"
+import type { Currency } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /**
@@ -15,6 +16,7 @@ export function TelemetryBand({
   inFlight,
   blocked,
   outstanding,
+  baseCurrency,
   overdueCount,
   health,
 }: {
@@ -24,6 +26,7 @@ export function TelemetryBand({
   inFlight: number
   blocked: number
   outstanding: number
+  baseCurrency: Currency
   overdueCount: number
   health: number
 }) {
@@ -38,7 +41,7 @@ export function TelemetryBand({
       <Cell label="Ingreso recurrente" className="col-span-2 sm:col-span-1">
         <div className="flex items-baseline gap-2">
           <span className="num text-[26px] leading-none font-semibold">
-            {money(mrr)}
+            {money(mrr * 100, "usd")}
           </span>
           <span
             className={cn(
@@ -83,7 +86,7 @@ export function TelemetryBand({
       <Cell label="Por cobrar">
         <div className="flex items-baseline gap-2">
           <span className="num text-[26px] leading-none font-semibold">
-            {money(outstanding)}
+            {money(outstanding, baseCurrency)}
           </span>
           {overdueCount > 0 && (
             <span className="num text-xs text-status-risk">

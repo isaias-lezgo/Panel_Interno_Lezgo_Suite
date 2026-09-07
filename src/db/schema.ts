@@ -22,6 +22,7 @@ export const clients = pgTable("clients", {
   status: text("status").notNull(),
   mrr: integer("mrr").notNull().default(0),
   ghlLocationId: text("ghl_location_id").notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
   owner: text("owner").notNull(),
   seats: integer("seats").notNull().default(0),
   health: integer("health").notNull().default(0),
