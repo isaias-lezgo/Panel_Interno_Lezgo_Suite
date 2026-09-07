@@ -20,7 +20,7 @@ export default async function ClientesPage() {
       <div className="px-4 pb-12 md:px-6">
         <Instrument
           label="Cartera completa"
-          hint={`${summary.activeCount} activos · ${money(summary.mrr)} MRR · ${churned} bajas`}
+          hint={`${summary.activeCount} activos · ${money(summary.mrr * 100, "usd")} MRR · ${churned} bajas`}
         >
           <ClientsTable clients={summary.clients} />
         </Instrument>

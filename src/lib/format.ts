@@ -1,23 +1,41 @@
+import type { Currency } from "@/lib/types"
+
 const LOCALE = "es-MX"
 
-const usd = new Intl.NumberFormat(LOCALE, {
-  style: "currency",
-  currency: "USD",
-  currencyDisplay: "narrowSymbol",
-  maximumFractionDigits: 0,
-})
+const formatters = new Map<string, Intl.NumberFormat>()
 
-const usdCents = new Intl.NumberFormat(LOCALE, {
-  style: "currency",
-  currency: "USD",
-  currencyDisplay: "narrowSymbol",
-})
+function formatter(currency: Currency, decimals: boolean) {
+  const key = `${currency}:${decimals}`
+  const cached = formatters.get(key)
+  if (cached) return cached
+  const made = new Intl.NumberFormat(LOCALE, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    currencyDisplay: "narrowSymbol",
+    maximumFractionDigits: decimals ? 2 : 0,
+  })
+  formatters.set(key, made)
+  return made
+}
 
-export const money = (n: number) => usd.format(n)
-export const moneyExact = (n: number) => usdCents.format(n)
+/**
+ * `cents` va en la unidad mínima de `currency`. La moneda es obligatoria a
+ * propósito: cuando el panel dejó de ser solo USD, un valor por defecto
+ * habría convertido cada call site viejo en una cifra silenciosamente falsa.
+ */
+export const money = (cents: number, currency: Currency) =>
+  formatter(currency, false).format(cents / 100)
 
-export const compactMoney = (n: number) =>
-  n >= 1000 ? `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `$${n}`
+export const moneyExact = (cents: number, currency: Currency) =>
+  formatter(currency, true).format(cents / 100)
+
+/** Para ejes de gráfica. Siempre MXN. */
+export const compactMoney = (cents: number) => {
+  const n = cents / 100
+  return n >= 1000
+    ? `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
+    : `$${Math.round(n)}`
+}
 
 export const percent = (n: number, digits = 0) =>
   `${n > 0 ? "+" : ""}${n.toFixed(digits).replace(".", ",")}%`

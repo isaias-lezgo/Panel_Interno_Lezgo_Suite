@@ -127,7 +127,8 @@ Esta tarea **no cambia ningún comportamiento visible**. Convierte el modelo a c
   - `money(cents: number, currency: Currency): string`
   - `moneyExact(cents: number, currency: Currency): string`
   - `compactMoney(cents: number): string` — siempre MXN
-  - `rowToInvoice(row: InvoiceRow, customerName: string, usdToMxn: number | null): Invoice`
+  - `baseCurrency(): Currency` — `"mxn"` con `STRIPE_SECRET_KEY`, `"usd"` sin ella
+  - `rowToInvoice(row: InvoiceRow, customerName: string, base: Currency, usdToMxn: number | null): Invoice`
 
 - [ ] **Step 1: Reescribir los tipos de factura en `src/lib/types.ts`**
 
@@ -177,7 +178,7 @@ export type Invoice = {
    * factura es USD y no hay `STRIPE_FX_USD_MXN`: se muestra, pero no entra
    * en ningún total.
    */
-  amountMxn: number | null
+  amountBase: number | null
   status: InvoiceStatus
   issuedAt: string
   /** `null` en cobro automático, donde Stripe no fija vencimiento. */
@@ -277,7 +278,7 @@ export function rowToInvoice(
     ...row,
     amount,
     currency: "usd",
-    amountMxn: usdToMxn === null ? null : Math.round(amount * usdToMxn),
+    amountBase: usdToMxn === null ? null : Math.round(amount * usdToMxn),
     customerName,
     dueAt: row.dueAt,
   }
@@ -309,7 +310,7 @@ En `getPortfolioSummary()`, cambiar el cálculo de `outstanding` (líneas 73-75)
 ```ts
   const outstanding = invoices
     .filter((i) => i.status === "overdue" || i.status === "due")
-    .reduce((sum, i) => sum + (i.amountMxn ?? 0), 0)
+    .reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
 ```
 
 - [ ] **Step 5: Agregar los dos estados nuevos al chip**
@@ -328,7 +329,7 @@ Cada uno pasa a centavos con moneda explícita. Los valores que hoy son dólares
 - `src/app/(panel)/clientes/page.tsx:23` → `money(summary.mrr * 100, "usd")`
 - `src/app/(panel)/page.tsx:63` → `money(i.amount, i.currency)`
 - `src/app/(panel)/clientes/[slug]/page.tsx:111` → `money(client.mrr * 100, "usd")`
-- `src/app/(panel)/clientes/[slug]/page.tsx:186` → `money(owed, "mxn")`; y donde se calcula `owed`, sumar `(i.amountMxn ?? 0)`
+- `src/app/(panel)/clientes/[slug]/page.tsx:186` → `money(owed, "mxn")`; y donde se calcula `owed`, sumar `(i.amountBase ?? 0)`
 - `src/app/(panel)/clientes/[slug]/page.tsx:217` → `money(invoice.amount, invoice.currency)`
 - `src/components/clients/clients-table.tsx:170` → `money(client.mrr * 100, "usd")`
 - `src/components/panel/telemetry-band.tsx:41` → `money(mrr * 100, "usd")`
@@ -340,20 +341,20 @@ Cada uno pasa a centavos con moneda explícita. Los valores que hoy son dólares
 
 En `src/components/billing/invoices-table.tsx`:
 
-- línea 76: `const total = rows.reduce((sum, i) => sum + (i.amountMxn ?? 0), 0)` y mostrar `money(total, "mxn")`
+- línea 76: `const total = rows.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)` y mostrar `money(total, "mxn")`
 - línea ~118: `const client = invoice.clientId ? clientById.get(invoice.clientId) : undefined`
 - la celda de cliente muestra `invoice.customerName` cuando no hay `client`, en vez del guion largo
 - la celda de importe: `money(invoice.amount, invoice.currency)`
 - la celda "Vence": `invoice.dueAt ? shortDate(invoice.dueAt) : "—"`, y el bloque de `relativeDays` solo cuando `invoice.dueAt` existe
 - agregar `void` y `uncollectible` a `statusFilterLabel` y al `<SelectContent>`, con las etiquetas "Anuladas" e "Incobrables"
 
-En `src/app/(panel)/facturacion/page.tsx`, los cuatro KPI suman `amountMxn` y formatean en MXN:
+En `src/app/(panel)/facturacion/page.tsx`, los cuatro KPI suman `amountBase` y formatean en MXN:
 
 ```ts
   const paid = summary.invoices.filter((i) => i.status === "paid")
   const overdue = summary.invoices.filter((i) => i.status === "overdue")
-  const collected = paid.reduce((sum, i) => sum + (i.amountMxn ?? 0), 0)
-  const overdueTotal = overdue.reduce((sum, i) => sum + (i.amountMxn ?? 0), 0)
+  const collected = paid.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
+  const overdueTotal = overdue.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
   const issued = summary.invoices.filter(
     (i) => i.status !== "draft" && i.status !== "void",
   )
@@ -666,7 +667,7 @@ describe("mapInvoice", () => {
     const i = mapInvoice(factura({ total: 887_052 }), 18.5, () => null)
     expect(i?.amount).toBe(887_052)
     expect(i?.currency).toBe("mxn")
-    expect(i?.amountMxn).toBe(887_052)
+    expect(i?.amountBase).toBe(887_052)
   })
 
   test("usa el concepto de la primera línea, no el agradecimiento", () => {
@@ -798,7 +799,7 @@ export function mapInvoice(
       invoice.customer_name ?? invoice.customer_email ?? "Sin nombre",
     amount: invoice.total,
     currency,
-    amountMxn: toMxn(invoice.total, currency, usdToMxn),
+    amountBase: toMxn(invoice.total, currency, usdToMxn),
     status: deriveStatus(invoice, now),
     issuedAt: isoDate(invoice.status_transitions?.finalized_at ?? invoice.created),
     dueAt: invoice.due_date ? isoDate(invoice.due_date) : null,
@@ -1047,7 +1048,7 @@ for (const i of feed.invoices) {
   const nombre = i.clientId
     ? (clients.find((c) => c.id === i.clientId)?.name ?? i.customerName)
     : i.customerName
-  facturado.set(nombre, (facturado.get(nombre) ?? 0) + (i.amountMxn ?? 0))
+  facturado.set(nombre, (facturado.get(nombre) ?? 0) + (i.amountBase ?? 0))
 }
 const ranked = [...facturado.entries()]
   .map(([name, total]) => ({ name, total }))
@@ -1286,6 +1287,19 @@ git commit -m "Documenta las reglas de Stripe en el panel"
 ```
 
 ---
+
+## Corrección aplicada durante la ejecución
+
+El plan original hacía que **todo** KPI se sumara en MXN. Con los datos de
+ejemplo —enteramente en USD— y sin `STRIPE_FX_USD_MXN`, los cuatro KPI de
+`/facturacion` mostraban `$0`: la regla de no inventar tipo de cambio se
+aplicaba a un conjunto de datos donde no hay nada mezclado que ocultar.
+
+La moneda base ahora **sigue a la fuente**: Stripe suma en MXN, Neon y el demo
+suman en USD. `getPortfolioSummary()` expone `baseCurrency` y los componentes
+que muestran totales la reciben como prop. La regla del spec queda intacta —una
+factura que no se puede convertir sigue fuera de los totales—, pero deja de
+castigar a una fuente que no está mezclada.
 
 ## Verificación final
 

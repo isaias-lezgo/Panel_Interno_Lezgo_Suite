@@ -42,7 +42,7 @@ export function MovementChart({ data }: { data: RevenuePoint[] }) {
           axisLine={false}
           width={44}
           tickMargin={4}
-          tickFormatter={(value: number) => compactMoney(Math.abs(value))}
+          tickFormatter={(value: number) => compactMoney(Math.abs(value) * 100)}
           className="text-[11px]"
         />
         <ReferenceLine y={0} stroke="var(--border)" />
@@ -50,7 +50,7 @@ export function MovementChart({ data }: { data: RevenuePoint[] }) {
           cursor={{ fill: "var(--muted)", opacity: 0.5 }}
           content={
             <ChartTooltipContent
-              formatter={(value) => compactMoney(Math.abs(Number(value)))}
+              formatter={(value) => compactMoney(Math.abs(Number(value)) * 100)}
             />
           }
         />

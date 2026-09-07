@@ -60,9 +60,11 @@ export default async function TableroPage() {
         id: i.id,
         tone: "risk" as const,
         kind: "Factura vencida",
-        title: `${i.number} · ${money(i.amount)}`,
-        client: nameOf(i.clientId),
-        detail: `Venció el ${shortDate(i.dueAt)} — ${relativeDays(i.dueAt)}`,
+        title: `${i.number} · ${money(i.amount, i.currency)}`,
+        client: i.clientId ? nameOf(i.clientId) : i.customerName,
+        detail: i.dueAt
+          ? `Venció el ${shortDate(i.dueAt)} — ${relativeDays(i.dueAt)}`
+          : "Stripe agotó los intentos de cobro.",
         href: "/facturacion",
       })),
     ...summary.atRisk.map((c) => ({
@@ -92,6 +94,7 @@ export default async function TableroPage() {
       <div className="space-y-4 px-4 pb-12 md:px-6">
         <TelemetryBand
           mrr={summary.mrr}
+          baseCurrency={summary.baseCurrency}
           mrrDelta={summary.mrrDelta}
           activeClients={summary.activeCount}
           inFlight={summary.inFlightCount}

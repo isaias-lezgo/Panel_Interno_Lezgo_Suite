@@ -7,8 +7,10 @@ import { db, schema } from "@/db"
 import type {
   ActivityEvent,
   Client,
+  Currency,
   Implementation,
   Invoice,
+  InvoiceRow,
   RevenuePoint,
 } from "@/lib/types"
 
@@ -37,9 +39,67 @@ export async function listImplementations(): Promise<Implementation[]> {
   return (await db.select().from(schema.implementations)) as Implementation[]
 }
 
+/**
+ * El tipo de cambio es un supuesto, no un dato medido. Sin él, las facturas
+ * en USD se muestran en su moneda y quedan fuera de los totales.
+ */
+export function usdToMxnRate(): number | null {
+  const raw = process.env.STRIPE_FX_USD_MXN
+  if (!raw) return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+/**
+ * La moneda en la que el panel suma. Stripe factura sobre todo en MXN; los
+ * datos de Neon y del demo son enteramente USD, y sumarlos en su propia
+ * moneda no mezcla nada. La base sigue a la fuente para que ningún KPI
+ * dependa de un tipo de cambio que nadie configuró.
+ */
+export function baseCurrency(): Currency {
+  return process.env.STRIPE_SECRET_KEY ? "mxn" : "usd"
+}
+
+/** Las filas de Neon y del demo son dólares enteros ligados a un cliente. */
+export function rowToInvoice(
+  row: InvoiceRow,
+  customerName: string,
+  base: Currency,
+  usdToMxn: number | null,
+): Invoice {
+  const amount = row.amount * 100
+  return {
+    ...row,
+    amount,
+    currency: "usd",
+    amountBase:
+      base === "usd"
+        ? amount
+        : usdToMxn === null
+          ? null
+          : Math.round(amount * usdToMxn),
+    customerName,
+  }
+}
+
 export async function listInvoices(): Promise<Invoice[]> {
-  if (!db) return demo.invoices
-  return (await db.select().from(schema.invoices)) as Invoice[]
+  const [rows, clients] = await Promise.all([
+    db
+      ? (db.select().from(schema.invoices) as Promise<InvoiceRow[]>)
+      : Promise.resolve(demo.invoices),
+    listClients(),
+  ])
+  const nameById = new Map(clients.map((c) => [c.id, c.name]))
+  const base = baseCurrency()
+  const fx = usdToMxnRate()
+  return rows.map((row) =>
+    rowToInvoice(
+      row,
+      nameById.get(row.clientId) ?? "Cliente desconocido",
+      base,
+      fx,
+    ),
+  )
 }
 
 export async function listActivity(limit = 10): Promise<ActivityEvent[]> {
@@ -72,7 +132,7 @@ export async function getPortfolioSummary() {
 
   const outstanding = invoices
     .filter((i) => i.status === "overdue" || i.status === "due")
-    .reduce((sum, i) => sum + i.amount, 0)
+    .reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
 
   const overdueCount = invoices.filter((i) => i.status === "overdue").length
 
@@ -81,6 +141,7 @@ export async function getPortfolioSummary() {
   const atRisk = clients.filter((c) => c.status === "at_risk")
 
   return {
+    baseCurrency: baseCurrency(),
     clients,
     implementations,
     invoices,

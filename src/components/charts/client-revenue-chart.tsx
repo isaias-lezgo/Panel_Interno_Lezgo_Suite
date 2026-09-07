@@ -49,7 +49,7 @@ export function ClientRevenueChart({ clients }: { clients: Client[] }) {
         <ChartTooltip
           cursor={{ fill: "var(--muted)", opacity: 0.5 }}
           content={
-            <ChartTooltipContent formatter={(value) => money(Number(value))} />
+            <ChartTooltipContent formatter={(value) => money(Number(value) * 100, "usd")} />
           }
         />
         <Bar dataKey="mrr" fill="var(--color-mrr)" radius={[0, 4, 4, 0]} barSize={14}>
@@ -59,7 +59,7 @@ export function ClientRevenueChart({ clients }: { clients: Client[] }) {
             offset={8}
             className="fill-muted-foreground"
             fontSize={11}
-            formatter={(value: unknown) => compactMoney(Number(value))}
+            formatter={(value: unknown) => compactMoney(Number(value) * 100)}
           />
         </Bar>
       </BarChart>

@@ -2,7 +2,7 @@ import type {
   ActivityEvent,
   Client,
   Implementation,
-  Invoice,
+  InvoiceRow,
   RevenuePoint,
 } from "@/lib/types"
 
@@ -374,7 +374,7 @@ export const implementations: Implementation[] = [
   },
 ]
 
-export const invoices: Invoice[] = [
+export const invoices: InvoiceRow[] = [
   { id: "in_1041", number: "LZ-1041", clientId: "cl_northgate", amount: 2400, status: "paid", issuedAt: "2026-08-01", dueAt: "2026-08-08", paidAt: "2026-08-03", memo: "Iguala de agosto" },
   { id: "in_1042", number: "LZ-1042", clientId: "cl_meridian", amount: 2150, status: "paid", issuedAt: "2026-08-01", dueAt: "2026-08-08", paidAt: "2026-08-02", memo: "Iguala de agosto" },
   { id: "in_1043", number: "LZ-1043", clientId: "cl_veloz", amount: 1980, status: "paid", issuedAt: "2026-08-01", dueAt: "2026-08-08", paidAt: "2026-08-06", memo: "Iguala de agosto" },

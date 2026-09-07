@@ -65,4 +65,6 @@ export const invoiceStatusLabel: Record<
   due: { label: "Por vencer", tone: "build" },
   overdue: { label: "Vencida", tone: "risk" },
   draft: { label: "Borrador", tone: "idle" },
+  void: { label: "Anulada", tone: "idle" },
+  uncollectible: { label: "Incobrable", tone: "risk" },
 }

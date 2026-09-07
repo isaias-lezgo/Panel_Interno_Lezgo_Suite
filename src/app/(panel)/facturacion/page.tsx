@@ -11,9 +11,11 @@ export default async function FacturacionPage() {
 
   const paid = summary.invoices.filter((i) => i.status === "paid")
   const overdue = summary.invoices.filter((i) => i.status === "overdue")
-  const collected = paid.reduce((sum, i) => sum + i.amount, 0)
-  const overdueTotal = overdue.reduce((sum, i) => sum + i.amount, 0)
-  const issued = summary.invoices.filter((i) => i.status !== "draft")
+  const collected = paid.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
+  const overdueTotal = overdue.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
+  const issued = summary.invoices.filter(
+    (i) => i.status !== "draft" && i.status !== "void",
+  )
   const collectionRate = issued.length
     ? Math.round((paid.length / issued.length) * 100)
     : 0
@@ -31,7 +33,7 @@ export default async function FacturacionPage() {
         <section className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:divide-x lg:grid-cols-4">
           <Cell label="Cobrado">
             <span className="num text-[26px] leading-none font-semibold">
-              {money(collected)}
+              {money(collected, summary.baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               {paid.length} facturas pagadas
@@ -39,7 +41,7 @@ export default async function FacturacionPage() {
           </Cell>
           <Cell label="Por cobrar">
             <span className="num text-[26px] leading-none font-semibold">
-              {money(summary.outstanding)}
+              {money(summary.outstanding, summary.baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               emitido y sin pagar
@@ -47,7 +49,7 @@ export default async function FacturacionPage() {
           </Cell>
           <Cell label="Vencido">
             <span className="num text-[26px] leading-none font-semibold text-status-risk">
-              {money(overdueTotal)}
+              {money(overdueTotal, summary.baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               {overdue.length} facturas fuera de plazo
@@ -58,7 +60,7 @@ export default async function FacturacionPage() {
               {collectionRate}%
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
-              ticket promedio {money(average)}
+              ticket promedio {money(average, summary.baseCurrency)}
             </p>
           </Cell>
         </section>
@@ -91,6 +93,7 @@ export default async function FacturacionPage() {
           <InvoicesTable
             invoices={summary.invoices}
             clients={summary.clients}
+            baseCurrency={summary.baseCurrency}
           />
         </Instrument>
       </div>
