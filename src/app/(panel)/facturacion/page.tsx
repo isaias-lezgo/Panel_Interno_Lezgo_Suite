@@ -1,3 +1,5 @@
+import { Fragment } from "react"
+
 import { ClientRevenueChart } from "@/components/charts/client-revenue-chart"
 import { InvoicesTable } from "@/components/billing/invoices-table"
 import { RefreshButton } from "@/components/billing/refresh-button"
@@ -79,31 +81,30 @@ export default async function FacturacionPage() {
         <section className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:divide-x lg:grid-cols-4">
           <Cell label="Cobrado">
             <span className="num text-[26px] leading-none font-semibold">
-              {money(cobrado.exact, baseCurrency)}
+              {money(cobrado.total, baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
-              {paid.length - cobrado.foreign.reduce((n, f) => n + f.count, 0)}{" "}
-              facturas pagadas en {baseCurrency.toUpperCase()}
+              {paid.length} facturas pagadas
             </p>
-            <Foreign split={cobrado} base={baseCurrency} />
+            <Desglose split={cobrado} base={baseCurrency} />
           </Cell>
           <Cell label="Por cobrar">
             <span className="num text-[26px] leading-none font-semibold">
-              {money(porCobrar.exact, baseCurrency)}
+              {money(porCobrar.total, baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               emitido y sin pagar
             </p>
-            <Foreign split={porCobrar} base={baseCurrency} />
+            <Desglose split={porCobrar} base={baseCurrency} />
           </Cell>
           <Cell label="Vencido">
             <span className="num text-[26px] leading-none font-semibold text-status-risk">
-              {money(vencido.exact, baseCurrency)}
+              {money(vencido.total, baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               {overdue.length} facturas fuera de plazo
             </p>
-            <Foreign split={vencido} base={baseCurrency} />
+            <Desglose split={vencido} base={baseCurrency} />
           </Cell>
           <Cell label="Tasa de cobro">
             <span className="num text-[26px] leading-none font-semibold">
@@ -117,7 +118,7 @@ export default async function FacturacionPage() {
 
         <p className="px-1 text-xs text-muted-foreground">
           {feed.usdToMxn
-            ? `Las cifras grandes son lo cobrado en ${baseCurrency.toUpperCase()}, sin conversión de por medio. Lo que llegó en otra moneda se declara debajo y su equivalente es un estimado a ${feed.usdToMxn} MXN por dólar (STRIPE_FX_USD_MXN).`
+            ? `Las cifras incluyen lo facturado en otra moneda, convertido a ${feed.usdToMxn} MXN por dólar (STRIPE_FX_USD_MXN). El desglose de cada una dice cuánto es dinero medido y cuánto es ese estimado.`
             : feed.source === "stripe"
               ? "Hay facturas en USD fuera de los totales: falta configurar STRIPE_FX_USD_MXN."
               : "Importes en USD, tal como están en la base."}
@@ -212,28 +213,30 @@ function Concentration({
 }
 
 /**
- * Lo que entró en otra moneda, debajo de la cifra medida. El equivalente va
- * rotulado como estimado: sale de una tasa configurada a mano, no de lo que
- * el banco liquidó ese día.
+ * De qué está hecha la cifra de arriba. Solo aparece cuando hubo cobros en
+ * otra moneda: el total los incluye, y aquí se ve cuánto es dinero medido y
+ * cuánto una conversión a una tasa que alguien configuró.
  */
-function Foreign({ split, base }: { split: CurrencySplit; base: Currency }) {
+function Desglose({ split, base }: { split: CurrencySplit; base: Currency }) {
   if (split.foreign.length === 0) return null
   return (
-    <div className="mt-1.5 space-y-0.5">
+    <p className="mt-1.5 text-xs text-muted-foreground">
+      <span className="num">{money(split.exact, base)}</span> en{" "}
+      {base.toUpperCase()}
       {split.foreign.map((f) => (
-        <p key={f.currency} className="text-xs text-muted-foreground">
-          <span className="num">
-            + {moneySigned(f.amount, f.currency, base)}
-          </span>{" "}
-          en {f.count} {f.count === 1 ? "factura" : "facturas"}
-          {f.converted !== null && (
+        <Fragment key={f.currency}>
+          {" · "}
+          <span className="num">{moneySigned(f.amount, f.currency, base)}</span>
+          {f.converted === null ? (
+            " fuera del total: falta el tipo de cambio"
+          ) : (
             <>
-              {" · "}
-              <span className="num">≈ {money(f.converted, base)}</span> estimado
+              {" ≈ "}
+              <span className="num">{money(f.converted, base)}</span> estimado
             </>
           )}
-        </p>
+        </Fragment>
       ))}
-    </div>
+    </p>
   )
 }
