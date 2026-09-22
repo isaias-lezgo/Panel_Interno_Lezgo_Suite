@@ -10,25 +10,47 @@ import {
 /**
  * Schema mirrors the domain types in `src/lib/types.ts` one-to-one so the
  * repository can hand rows straight to the UI without a mapping layer.
- * Money is stored in whole dollars — we never invoice fractional cents.
+ * `invoices` stores whole dollars (demo data); everything from Stripe is
+ * cents and never touches these tables.
  */
 
 export const clients = pgTable("clients", {
   id: text("id").primaryKey(),
-  name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
-  industry: text("industry").notNull(),
-  plan: text("plan").notNull(),
-  status: text("status").notNull(),
-  mrr: integer("mrr").notNull().default(0),
-  ghlLocationId: text("ghl_location_id").notNull(),
-  stripeCustomerId: text("stripe_customer_id"),
-  owner: text("owner").notNull(),
-  seats: integer("seats").notNull().default(0),
-  health: integer("health").notNull().default(0),
-  startedAt: date("started_at", { mode: "string" }).notNull(),
-  renewsAt: date("renews_at", { mode: "string" }).notNull(),
+  name: text("name").notNull(),
+  contactName: text("contact_name").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  ghlContactId: text("ghl_contact_id").notNull(),
+  ghlLocationId: text("ghl_location_id"),
+  ghlLocationLinkedBy: text("ghl_location_linked_by"),
+  stage: text("stage").notNull(),
+  wonAt: date("won_at", { mode: "string" }).notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true, mode: "string" }).notNull(),
+  orphaned: boolean("orphaned").notNull().default(false),
   notes: text("notes"),
+})
+
+export const clientOpportunities = pgTable("client_opportunities", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  monetaryValue: integer("monetary_value").notNull().default(0),
+  stageId: text("stage_id").notNull(),
+  stageName: text("stage_name").notNull(),
+  wonAt: date("won_at", { mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+})
+
+export const clientStripeCustomers = pgTable("client_stripe_customers", {
+  stripeCustomerId: text("stripe_customer_id").primaryKey(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  linkedBy: text("linked_by").notNull(),
+  linkedAt: timestamp("linked_at", { withTimezone: true, mode: "string" }).notNull(),
 })
 
 export const implementations = pgTable("implementations", {

@@ -1,30 +1,52 @@
 /** Domain model for the Lezgo Suite control panel. */
 
-export type Plan = "launch" | "scale" | "enterprise"
+export type LinkedBy = "auto" | "manual"
 
-export type ClientStatus = "live" | "onboarding" | "at_risk" | "churned"
-
+/**
+ * Un cliente es un contacto de la subcuenta Lezgo Suite con al menos una
+ * oportunidad ganada. Los enlaces a Stripe viven en `StripeLink`; el de la
+ * subcuenta de GHL, aquí mismo.
+ */
 export type Client = {
+  /** Id del contacto en GHL. Agrupa sus oportunidades. */
   id: string
-  name: string
   slug: string
-  industry: string
-  plan: Plan
-  status: ClientStatus
-  /** Monthly recurring revenue in USD. */
-  mrr: number
-  /** GoHighLevel sub-account this client maps to. */
-  ghlLocationId: string
-  /** Cliente de Stripe que paga esta cuenta. Se llena con `pnpm stripe:map`. */
-  stripeCustomerId?: string
-  /** Account manager on our side. */
-  owner: string
-  seats: number
-  /** 0–100. Blends product usage, ticket volume and payment history. */
-  health: number
-  startedAt: string
-  renewsAt: string
-  notes?: string
+  /** Empresa del contacto; si no hay, el nombre del contacto. */
+  name: string
+  contactName: string
+  email: string | null
+  phone: string | null
+  ghlContactId: string
+  /** Subcuenta del cliente. `null` hasta que se enlaza. */
+  ghlLocationId: string | null
+  ghlLocationLinkedBy: LinkedBy | null
+  /** Etapa de su oportunidad más reciente, tal cual la nombra el pipeline. */
+  stage: string
+  /** Cierre más antiguo entre sus oportunidades. */
+  wonAt: string
+  syncedAt: string
+  /** No apareció en la última sincronización. No se borra. */
+  orphaned: boolean
+  notes: string | null
+}
+
+export type ClientOpportunity = {
+  id: string
+  clientId: string
+  name: string
+  /** Pesos enteros, como lo entrega GHL. */
+  monetaryValue: number
+  stageId: string
+  stageName: string
+  wonAt: string
+  updatedAt: string
+}
+
+export type StripeLink = {
+  stripeCustomerId: string
+  clientId: string
+  linkedBy: LinkedBy
+  linkedAt: string
 }
 
 export type ImplementationStage =
