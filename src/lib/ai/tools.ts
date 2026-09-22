@@ -52,7 +52,6 @@ export const panelTools = {
       const s = await getPortfolioSummary()
       return {
         mrr: s.mrr,
-        mrrDeltaPercent: Number(s.mrrDelta.toFixed(1)),
         activeClients: s.activeCount,
         outstanding: s.outstanding,
         overdueInvoices: s.overdueCount,

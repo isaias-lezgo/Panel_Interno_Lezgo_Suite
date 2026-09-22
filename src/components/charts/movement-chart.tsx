@@ -10,12 +10,17 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
-import { compactMoney } from "@/lib/format"
-import type { RevenuePoint } from "@/lib/types"
+import { compactMoney, money } from "@/lib/format"
+import type { MovementPoint } from "@/lib/stripe/series"
+import type { Currency } from "@/lib/types"
 
+/**
+ * Sin serie de expansión: Stripe no guarda el historial de cambios de importe
+ * de una suscripción, y una barra estimada al lado de dos exactas se leería
+ * igual de cierta que ellas.
+ */
 const config = {
-  new: { label: "Nuevos", color: "var(--chart-2)" },
-  expansion: { label: "Expansión", color: "var(--chart-3)" },
+  new: { label: "Altas", color: "var(--chart-2)" },
   churn: { label: "Cancelación", color: "var(--chart-5)" },
 } satisfies ChartConfig
 
@@ -23,7 +28,13 @@ const config = {
  * Gains stack up from the zero line, churn drops below it, so the month's net
  * is the visible difference rather than a number you have to compute.
  */
-export function MovementChart({ data }: { data: RevenuePoint[] }) {
+export function MovementChart({
+  data,
+  currency,
+}: {
+  data: MovementPoint[]
+  currency: Currency
+}) {
   const series = data.map((point) => ({ ...point, churn: -point.churn }))
 
   return (
@@ -42,7 +53,7 @@ export function MovementChart({ data }: { data: RevenuePoint[] }) {
           axisLine={false}
           width={44}
           tickMargin={4}
-          tickFormatter={(value: number) => compactMoney(Math.abs(value) * 100)}
+          tickFormatter={(value: number) => compactMoney(Math.abs(value))}
           className="text-[11px]"
         />
         <ReferenceLine y={0} stroke="var(--border)" />
@@ -50,7 +61,7 @@ export function MovementChart({ data }: { data: RevenuePoint[] }) {
           cursor={{ fill: "var(--muted)", opacity: 0.5 }}
           content={
             <ChartTooltipContent
-              formatter={(value) => compactMoney(Math.abs(Number(value)) * 100)}
+              formatter={(value) => money(Math.abs(Number(value)), currency)}
             />
           }
         />
@@ -60,15 +71,7 @@ export function MovementChart({ data }: { data: RevenuePoint[] }) {
             cannot tell teal from indigo. */}
         <Bar
           dataKey="new"
-          stackId="gain"
           fill="var(--color-new)"
-          stroke="var(--card)"
-          strokeWidth={2}
-        />
-        <Bar
-          dataKey="expansion"
-          stackId="gain"
-          fill="var(--color-expansion)"
           stroke="var(--card)"
           strokeWidth={2}
           radius={[3, 3, 0, 0]}

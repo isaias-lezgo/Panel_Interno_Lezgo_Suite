@@ -1,6 +1,4 @@
-import { ArrowDownRight, ArrowUpRight } from "lucide-react"
-
-import { money, percent } from "@/lib/format"
+import { money } from "@/lib/format"
 import type { Currency } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -10,7 +8,6 @@ import { cn } from "@/lib/utils"
  */
 export function TelemetryBand({
   mrr,
-  mrrDelta,
   activeClients,
   inFlight,
   blocked,
@@ -18,10 +15,9 @@ export function TelemetryBand({
   baseCurrency,
   overdueCount,
   unlinked,
-  showDelta,
 }: {
+  /** Centavos de `baseCurrency`. */
   mrr: number
-  mrrDelta: number
   activeClients: number
   inFlight: number
   blocked: number
@@ -30,37 +26,18 @@ export function TelemetryBand({
   overdueCount: number
   /** Clientes activos sin Stripe o sin subcuenta enlazada. */
   unlinked: number
-  /** La variación solo tiene sentido contra la serie del demo. */
-  showDelta: boolean
 }) {
-  const up = mrrDelta >= 0
-  const Arrow = up ? ArrowUpRight : ArrowDownRight
-
   return (
     <section
       aria-label="Telemetría de la cartera"
       className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3 sm:divide-x lg:grid-cols-5"
     >
       <Cell label="Ingreso recurrente" className="col-span-2 sm:col-span-1">
-        <div className="flex items-baseline gap-2">
-          <span className="num text-[26px] leading-none font-semibold">
-            {money(mrr, baseCurrency)}
-          </span>
-          {showDelta && (
-            <span
-              className={cn(
-                "num inline-flex items-center gap-0.5 text-xs",
-                up ? "text-status-live" : "text-status-risk",
-              )}
-            >
-              <Arrow className="size-3" aria-hidden />
-              {percent(mrrDelta, 1)}
-            </span>
-          )}
-        </div>
+        <span className="num text-[26px] leading-none font-semibold">
+          {money(mrr, baseCurrency)}
+        </span>
         <p className="mt-2 text-xs text-muted-foreground">
-          {showDelta ? "vs. mes anterior" : "suscripciones activas en Stripe"} ·{" "}
-          {activeClients} cuentas activas
+          suscripciones activas en Stripe · {activeClients} cuentas activas
         </p>
       </Cell>
 

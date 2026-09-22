@@ -61,6 +61,17 @@ export async function listRecentInvoices(months = 12) {
   }
 }
 
+/** Todas, incluidas las canceladas: de ahí salen las altas y bajas por mes. */
+export async function listAllSubscriptions() {
+  try {
+    return await stripe()
+      .subscriptions.list({ status: "all", limit: 100 })
+      .autoPagingToArray({ limit: 2000 })
+  } catch (error) {
+    wrap(error, "/v1/subscriptions")
+  }
+}
+
 export async function listActiveSubscriptions() {
   try {
     return await stripe()
@@ -85,31 +96,39 @@ export async function listCustomers() {
  * Suscripciones activas agrupadas por cliente y llevadas a mes: una anual
  * cuenta por su doceava parte. Solo mes y año; semana y día no se usan aquí.
  */
+/**
+ * Lo que una suscripción vale al mes, por moneda. Una anual cuenta por su
+ * doceava parte; semana y día no se usan en esta cuenta.
+ */
+export function monthlyAmounts(sub: Stripe.Subscription) {
+  const out: { amount: number; currency: Currency }[] = []
+  for (const item of sub.items.data) {
+    const price = item.price
+    const unit = price.unit_amount ?? 0
+    const qty = item.quantity ?? 1
+    const rec = price.recurring
+    if (!rec || unit === 0) continue
+    const c = price.currency.toLowerCase()
+    if (c !== "mxn" && c !== "usd") continue
+    const perMonth =
+      rec.interval === "month"
+        ? (unit * qty) / rec.interval_count
+        : rec.interval === "year"
+          ? (unit * qty) / (12 * rec.interval_count)
+          : 0
+    if (!perMonth) continue
+    out.push({ amount: Math.round(perMonth), currency: c })
+  }
+  return out
+}
+
 export async function summarizeSubscriptions() {
   const subs = await listActiveSubscriptions()
   const out = new Map<string, { amount: number; currency: Currency }[]>()
   for (const s of subs) {
     const cus = typeof s.customer === "string" ? s.customer : s.customer.id
-    for (const item of s.items.data) {
-      const price = item.price
-      const unit = price.unit_amount ?? 0
-      const qty = item.quantity ?? 1
-      const rec = price.recurring
-      if (!rec || unit === 0) continue
-      const c = price.currency.toLowerCase()
-      if (c !== "mxn" && c !== "usd") continue
-      const perMonth =
-        rec.interval === "month"
-          ? (unit * qty) / rec.interval_count
-          : rec.interval === "year"
-            ? (unit * qty) / (12 * rec.interval_count)
-            : 0
-      if (!perMonth) continue
-      out.set(cus, [
-        ...(out.get(cus) ?? []),
-        { amount: Math.round(perMonth), currency: c },
-      ])
-    }
+    const amounts = monthlyAmounts(s)
+    if (amounts.length) out.set(cus, [...(out.get(cus) ?? []), ...amounts])
   }
   return out
 }

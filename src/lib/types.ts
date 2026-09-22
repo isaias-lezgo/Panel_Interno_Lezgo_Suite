@@ -102,19 +102,39 @@ export type ImplementationKind =
   | "migration"
   | "training"
 
-export type Implementation = {
+/** Contacto de la subcuenta Lezgo Suite, tal como se guardó al ligarlo. */
+export type ImplementationContact = {
   id: string
-  clientId: string
   name: string
-  kind: ImplementationKind
+  email: string | null
+  phone: string | null
+}
+
+/** La fila de `implementations` y de los datos de ejemplo. */
+export type ImplementationRow = {
+  id: string
+  /** Cliente del panel, si alguno de los contactos lo es. */
+  clientId: string | null
+  ghlLocationId?: string | null
+  /** Nombre de la subcuenta al crearla; GHL no se consulta para pintarla. */
+  ghlLocationName?: string | null
+  name: string
+  /** `null` hasta que se define en un paso posterior. */
+  kind: ImplementationKind | null
   stage: ImplementationStage
   /** 0–100. */
   progress: number
-  owner: string
-  dueAt: string
+  owner: string | null
+  dueAt: string | null
   updatedAt: string
+  /** ISO con zona. En los datos de ejemplo no existe. */
+  createdAt?: string
   blocked: boolean
-  blockedReason?: string
+  blockedReason?: string | null
+}
+
+export type Implementation = ImplementationRow & {
+  contacts: ImplementationContact[]
 }
 
 export type Currency = "mxn" | "usd"
@@ -188,11 +208,3 @@ export type ActivityEvent = {
   clientId?: string
 }
 
-/** One month of revenue movement. Churn is stored positive and rendered down. */
-export type RevenuePoint = {
-  month: string
-  recurring: number
-  new: number
-  expansion: number
-  churn: number
-}

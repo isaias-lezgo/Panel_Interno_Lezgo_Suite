@@ -129,6 +129,16 @@ real (`acct_1LKAgaLSMWyOIdkA`):
   sincronizar cuando coincide correo, teléfono o nombre exacto, y lo demás se
   elige a mano en la ficha del cliente.
 
+**Series del tablero.** Las dos gráficas se derivan de Stripe en
+`src/lib/stripe/series.ts`: "Cobrado por mes" de las facturas pagadas, y
+"Altas y cancelaciones" de las fechas `created` y `canceled_at` de cada
+suscripción. **No hay serie de expansión**: Stripe no guarda el historial de
+cambios de importe, y una barra estimada junto a dos exactas se leería igual
+de cierta. Lo que no se puede convertir a la moneda base se cuenta en
+`omitted` y se declara al pie del instrumento. Sin Stripe las gráficas
+muestran un estado vacío: la tabla `revenue` de ejemplo se retiró porque
+dibujaba una curva inventada junto a cifras reales.
+
 **Clientes.** Salen de las oportunidades **ganadas** del pipeline "Ventas" de
 la subcuenta Lezgo Suite, agrupadas por contacto (`src/lib/clients/`). La sync
 corre al apretar "Sincronizar con GHL" o sola si la última tiene más de una

@@ -2,9 +2,8 @@ import type {
   ActivityEvent,
   Client,
   ClientOpportunity,
-  Implementation,
+  ImplementationRow,
   InvoiceRow,
-  RevenuePoint,
   StripeLink,
 } from "@/lib/types"
 
@@ -74,7 +73,7 @@ export const stripeLinks: StripeLink[] = [
   { stripeCustomerId: "cus_demo_veloz", clientId: "cl_veloz", linkedBy: "manual", linkedAt: synced },
 ]
 
-export const implementations: Implementation[] = [
+export const implementations: ImplementationRow[] = [
   {
     id: "im_001",
     clientId: "cl_atlas",
@@ -277,17 +276,3 @@ export const activity: ActivityEvent[] = [
   { id: "ac_10", at: "2026-08-15T18:26:00Z", kind: "client", actor: "Isaias Rios", summary: "Marcó a Ridgeline Landscaping como cuenta en riesgo", clientId: "cl_ridgeline" },
 ]
 
-export const revenue: RevenuePoint[] = [
-  { month: "Sep", recurring: 9820, new: 640, expansion: 210, churn: 380 },
-  { month: "Oct", recurring: 10410, new: 590, expansion: 340, churn: 340 },
-  { month: "Nov", recurring: 11180, new: 980, expansion: 190, churn: 400 },
-  { month: "Dic", recurring: 11640, new: 520, expansion: 420, churn: 480 },
-  { month: "Ene", recurring: 12310, new: 890, expansion: 280, churn: 500 },
-  { month: "Feb", recurring: 12960, new: 760, expansion: 410, churn: 520 },
-  { month: "Mar", recurring: 13290, new: 640, expansion: 250, churn: 560 },
-  { month: "Abr", recurring: 13710, new: 700, expansion: 320, churn: 600 },
-  { month: "May", recurring: 13480, new: 480, expansion: 180, churn: 890 },
-  { month: "Jun", recurring: 13920, new: 820, expansion: 260, churn: 640 },
-  { month: "Jul", recurring: 14650, new: 1090, expansion: 340, churn: 700 },
-  { month: "Ago", recurring: 15130, new: 1500, expansion: 290, churn: 1310 },
-]

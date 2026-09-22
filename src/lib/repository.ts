@@ -5,13 +5,23 @@ import { desc, eq, max } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
-import { ghl } from "@/lib/ghl/client"
+import { ghl, type GhlContact } from "@/lib/ghl/client"
+import { lezgoSuite, lezgoSuiteEnabled } from "@/lib/ghl/lezgo-suite"
 import {
+  listAllSubscriptions,
   listCustomers,
   listRecentInvoices,
+  monthlyAmounts,
   stripeEnabled,
   summarizeSubscriptions,
 } from "@/lib/stripe/client"
+import {
+  monthlyCollected,
+  monthlyMovement,
+  type CollectedPoint,
+  type MovementPoint,
+  type SubscriptionSpan,
+} from "@/lib/stripe/series"
 import { mapInvoice, toMxn } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
@@ -21,10 +31,11 @@ import type {
   ClientRow,
   Currency,
   Implementation,
+  ImplementationContact,
+  ImplementationRow,
   Invoice,
   InvoiceRow,
   LocationOption,
-  RevenuePoint,
   StripeCustomerOption,
   StripeLink,
 } from "@/lib/types"
@@ -73,8 +84,94 @@ export async function lastSyncAt(): Promise<string | null> {
 }
 
 export async function listImplementations(): Promise<Implementation[]> {
-  if (!db) return demo.implementations
-  return (await db.select().from(schema.implementations)) as Implementation[]
+  if (!db) return demo.implementations.map((i) => ({ ...i, contacts: [] }))
+  const [rows, contacts] = await Promise.all([
+    db
+      .select()
+      .from(schema.implementations)
+      .orderBy(desc(schema.implementations.updatedAt)),
+    db.select().from(schema.implementationContacts),
+  ])
+  const byImplementation = new Map<string, ImplementationContact[]>()
+  for (const c of contacts) {
+    const list = byImplementation.get(c.implementationId) ?? []
+    list.push({ id: c.ghlContactId, name: c.name, email: c.email, phone: c.phone })
+    byImplementation.set(c.implementationId, list)
+  }
+  return rows.map((r) => ({
+    ...(r as ImplementationRow),
+    contacts: byImplementation.get(r.id) ?? [],
+  }))
+}
+
+/* ------------------------------------------- contactos de Lezgo Suite */
+
+/** GHL entrega `contactName` en minúsculas; el nombre se arma de sus partes. */
+export function contactDisplayName(c: GhlContact) {
+  const name = [c.firstName, c.lastName].filter(Boolean).join(" ").trim()
+  return name || c.companyName?.trim() || c.email || c.phone || c.id
+}
+
+function toContactOption(c: GhlContact): ImplementationContact {
+  return {
+    id: c.id,
+    name: contactDisplayName(c),
+    email: c.email ?? null,
+    phone: c.phone ?? null,
+  }
+}
+
+/**
+ * Contactos de la subcuenta Lezgo Suite. Sin texto se ofrecen los clientes
+ * del panel —ya son contactos de Lezgo Suite y son los probables—; con texto
+ * se busca en GHL, que tiene miles.
+ */
+export async function searchLezgoContacts(query: string): Promise<{
+  options: ImplementationContact[]
+  error: string | null
+}> {
+  const q = query.trim()
+  if (!q) {
+    const clients = await listClients()
+    return {
+      options: clients
+        .filter((c) => !c.orphaned)
+        .map((c) => ({
+          id: c.ghlContactId,
+          name: c.contactName,
+          email: c.email,
+          phone: c.phone,
+        })),
+      error: null,
+    }
+  }
+  if (!lezgoSuiteEnabled()) {
+    return { options: [], error: "Falta GHL_LEZGO_SUITE_TOKEN" }
+  }
+  try {
+    const { contacts } = await lezgoSuite.searchContacts({
+      query: q,
+      pageLimit: 20,
+    })
+    return { options: contacts.map(toContactOption), error: null }
+  } catch (error) {
+    console.error("GHL no respondió", error)
+    return { options: [], error: "GoHighLevel no respondió" }
+  }
+}
+
+/** Lee un contacto de Lezgo Suite; `null` si no existe o GHL no responde. */
+export async function getLezgoContact(
+  id: string,
+): Promise<ImplementationContact | null> {
+  if (!lezgoSuiteEnabled()) return null
+  try {
+    const { contact } = await lezgoSuite.getContact(id)
+    return contact ? toContactOption(contact) : null
+  } catch (error) {
+    console.error("GHL no respondió", error)
+    return null
+  }
 }
 
 /**
@@ -483,33 +580,90 @@ export async function listActivity(limit = 10): Promise<ActivityEvent[]> {
     .limit(limit)) as ActivityEvent[]
 }
 
-export async function listRevenue(): Promise<RevenuePoint[]> {
-  if (!db) return demo.revenue
-  return (await db.select().from(schema.revenue)) as RevenuePoint[]
+/**
+ * Las dos series del tablero. Con Stripe salen de las facturas pagadas y de
+ * las fechas de alta y cancelación de cada suscripción; sin Stripe no hay
+ * historia que contar y se dice así, en vez de dibujar la serie de ejemplo
+ * junto a cifras reales.
+ */
+const cachedSeries = unstable_cache(
+  async (fx: number | null, base: Currency) => {
+    const [invoicesRaw, subs] = await Promise.all([
+      listRecentInvoices(12),
+      listAllSubscriptions(),
+    ])
+    const invoices = invoicesRaw
+      .map((i) => mapInvoice(i, fx, () => null))
+      .filter((i): i is Invoice => i !== null)
+
+    const spans: SubscriptionSpan[] = subs
+      // Una suscripción que nunca llegó a cobrarse no es un alta.
+      .filter((s) => s.status !== "incomplete_expired")
+      .map((s) => {
+        const amounts = monthlyAmounts(s)
+        const total = amounts.reduce<number | null>((acc, a) => {
+          const v =
+            base === "mxn"
+              ? toMxn(a.amount, a.currency, fx)
+              : a.currency === "usd"
+                ? a.amount
+                : null
+          return v === null ? acc : (acc ?? 0) + v
+        }, null)
+        return {
+          createdAt: new Date(s.created * 1000).toISOString().slice(0, 10),
+          canceledAt: s.canceled_at
+            ? new Date(s.canceled_at * 1000).toISOString().slice(0, 10)
+            : null,
+          amountBase: amounts.length === 0 ? 0 : total,
+        }
+      })
+
+    return {
+      collected: monthlyCollected(invoices, 12),
+      movement: monthlyMovement(spans, 12),
+    }
+  },
+  ["stripe-series"],
+  { revalidate: 300, tags: ["stripe"] },
+)
+
+export type RevenueSeries = {
+  collected: CollectedPoint[]
+  movement: MovementPoint[]
+  source: "stripe" | "none"
+  currency: Currency
+}
+
+export async function getRevenueSeries(): Promise<RevenueSeries> {
+  const base = baseCurrency()
+  if (!stripeEnabled()) {
+    return { collected: [], movement: [], source: "none", currency: base }
+  }
+  try {
+    const { collected, movement } = await cachedSeries(usdToMxnRate(), base)
+    return { collected, movement, source: "stripe", currency: base }
+  } catch (error) {
+    console.error("Stripe no respondió; sin series", error)
+    return { collected: [], movement: [], source: "none", currency: base }
+  }
 }
 
 /** Everything the dashboard's telemetry band reports, computed once. */
 export async function getPortfolioSummary() {
-  const [rows, implementations, invoices, revenue] = await Promise.all([
+  const [rows, implementations, invoices, series] = await Promise.all([
     listClientRows(),
     listImplementations(),
     listInvoices(),
-    listRevenue(),
+    getRevenueSeries(),
   ])
 
   const clients: Client[] = rows
   const active = rows.filter((c) => !c.orphaned)
-  // Con Stripe, el MRR son las suscripciones activas de los cus_ enlazados.
-  // Sin él no hay fuente real: se usa la serie `revenue` (dólares enteros del
-  // demo), que es lo único comparable mes a mes.
-  const withStripe = stripeEnabled()
-  const latest = revenue.at(-1)?.recurring ?? 0
-  const previous = revenue.at(-2)?.recurring ?? 0
-  const mrr = withStripe
-    ? active.reduce((sum, c) => sum + (c.mrr ?? 0), 0)
-    : latest * 100
-  const mrrDelta =
-    !withStripe && previous ? ((latest - previous) / previous) * 100 : 0
+  // El MRR son las suscripciones activas de Stripe de los cus_ enlazados.
+  // Sin Stripe no hay fuente: cero y sin variación, en vez de una cifra de
+  // ejemplo con aire de real.
+  const mrr = active.reduce((sum, c) => sum + (c.mrr ?? 0), 0)
 
   const outstanding = invoices
     .filter((i) => i.status === "overdue" || i.status === "due")
@@ -527,10 +681,8 @@ export async function getPortfolioSummary() {
     rows,
     implementations,
     invoices,
-    revenue,
+    series,
     mrr,
-    mrrDelta,
-    showMrrDelta: !withStripe,
     activeCount: active.length,
     outstanding,
     overdueCount,

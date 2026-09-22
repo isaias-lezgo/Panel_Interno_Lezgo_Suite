@@ -28,7 +28,6 @@ async function main() {
   await db.delete(schema.clientStripeCustomers)
   await db.delete(schema.clientOpportunities)
   await db.delete(schema.clients)
-  await db.delete(schema.revenue)
 
   await db.insert(schema.clients).values(demo.clients)
   await db.insert(schema.clientOpportunities).values(demo.clientOpportunities)
@@ -36,7 +35,6 @@ async function main() {
   await db.insert(schema.implementations).values(demo.implementations)
   await db.insert(schema.invoices).values(demo.invoices)
   await db.insert(schema.activity).values(demo.activity)
-  await db.insert(schema.revenue).values(demo.revenue)
 
   console.log(
     `Listo: ${demo.clients.length} clientes, ${demo.implementations.length} implementaciones, ${demo.invoices.length} facturas.`,

@@ -33,6 +33,15 @@ const activityIcon: Record<ActivityKind, typeof UserIcon> = {
   client: UserIcon,
 }
 
+/**
+ * Lo que quedó fuera de la serie por no poder convertirse a la moneda base
+ * se dice al pie; callarlo haría pasar la gráfica por completa.
+ */
+function omitidas(puntos: { omitted: number }[]) {
+  const total = puntos.reduce((s, p) => s + p.omitted, 0)
+  return total ? ` · ${total} sin tipo de cambio` : ""
+}
+
 export default async function TableroPage() {
   const [summary, activity] = await Promise.all([
     getPortfolioSummary(),
@@ -50,7 +59,7 @@ export default async function TableroPage() {
         tone: "warn" as const,
         kind: "Proyecto bloqueado",
         title: i.name,
-        client: nameOf(i.clientId),
+        client: i.clientId ? nameOf(i.clientId) : (i.ghlLocationName ?? "—"),
         detail: i.blockedReason ?? "Sin motivo registrado.",
         href: "/implementaciones",
       })),
@@ -98,33 +107,59 @@ export default async function TableroPage() {
         <TelemetryBand
           mrr={summary.mrr}
           baseCurrency={summary.baseCurrency}
-          mrrDelta={summary.mrrDelta}
           activeClients={summary.activeCount}
           inFlight={summary.inFlightCount}
           blocked={summary.blockedCount}
           outstanding={summary.outstanding}
           overdueCount={summary.overdueCount}
           unlinked={summary.unlinked.length}
-          showDelta={summary.showMrrDelta}
         />
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Instrument
-            label="Ingreso recurrente"
-            hint="Últimos 12 meses, cierre de mes"
+            label="Cobrado por mes"
+            hint={
+              summary.series.source === "stripe"
+                ? `Últimos 12 meses, facturas pagadas en Stripe${omitidas(summary.series.collected)}`
+                : "Sin Stripe conectado"
+            }
           >
-            <div className="p-3">
-              <RevenueChart data={summary.revenue} />
-            </div>
+            {summary.series.source === "stripe" ? (
+              <div className="p-3">
+                <RevenueChart
+                  data={summary.series.collected}
+                  currency={summary.series.currency}
+                />
+              </div>
+            ) : (
+              <EmptyState title="Sin datos de cobro">
+                La serie sale de las facturas de Stripe. Define{" "}
+                <code>STRIPE_SECRET_KEY</code> para verla.
+              </EmptyState>
+            )}
           </Instrument>
 
           <Instrument
-            label="Movimiento de ingreso"
-            hint="Altas y expansión frente a cancelación"
+            label="Altas y cancelaciones"
+            hint={
+              summary.series.source === "stripe"
+                ? `Suscripciones que empezaron y terminaron cada mes${omitidas(summary.series.movement)}`
+                : "Sin Stripe conectado"
+            }
           >
-            <div className="p-3">
-              <MovementChart data={summary.revenue} />
-            </div>
+            {summary.series.source === "stripe" ? (
+              <div className="p-3">
+                <MovementChart
+                  data={summary.series.movement}
+                  currency={summary.series.currency}
+                />
+              </div>
+            ) : (
+              <EmptyState title="Sin movimiento que mostrar">
+                Las altas y las bajas salen de Stripe. Define{" "}
+                <code>STRIPE_SECRET_KEY</code> para verlas.
+              </EmptyState>
+            )}
           </Instrument>
         </div>
 

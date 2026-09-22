@@ -3,6 +3,7 @@ import {
   date,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
 } from "drizzle-orm/pg-core"
@@ -53,21 +54,47 @@ export const clientStripeCustomers = pgTable("client_stripe_customers", {
   linkedAt: timestamp("linked_at", { withTimezone: true, mode: "string" }).notNull(),
 })
 
+/**
+ * Una implementación nace de una subcuenta de GHL y de uno o más contactos
+ * de Lezgo Suite. Tipo, responsable y entrega se llenan después, por eso
+ * aceptan `null`. `clientId` apunta al cliente del panel cuando alguno de
+ * los contactos lo es.
+ */
 export const implementations = pgTable("implementations", {
   id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
+  clientId: text("client_id").references(() => clients.id, {
+    onDelete: "set null",
+  }),
+  ghlLocationId: text("ghl_location_id"),
+  ghlLocationName: text("ghl_location_name"),
   name: text("name").notNull(),
-  kind: text("kind").notNull(),
+  kind: text("kind"),
   stage: text("stage").notNull(),
   progress: integer("progress").notNull().default(0),
-  owner: text("owner").notNull(),
-  dueAt: date("due_at", { mode: "string" }).notNull(),
+  owner: text("owner"),
+  dueAt: date("due_at", { mode: "string" }),
   updatedAt: date("updated_at", { mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .notNull()
+    .defaultNow(),
   blocked: boolean("blocked").notNull().default(false),
   blockedReason: text("blocked_reason"),
 })
+
+/** Contactos de la subcuenta Lezgo Suite ligados a una implementación. */
+export const implementationContacts = pgTable(
+  "implementation_contacts",
+  {
+    implementationId: text("implementation_id")
+      .notNull()
+      .references(() => implementations.id, { onDelete: "cascade" }),
+    ghlContactId: text("ghl_contact_id").notNull(),
+    name: text("name").notNull(),
+    email: text("email"),
+    phone: text("phone"),
+  },
+  (t) => [primaryKey({ columns: [t.implementationId, t.ghlContactId] })],
+)
 
 export const invoices = pgTable("invoices", {
   id: text("id").primaryKey(),
@@ -94,10 +121,3 @@ export const activity = pgTable("activity", {
   }),
 })
 
-export const revenue = pgTable("revenue", {
-  month: text("month").primaryKey(),
-  recurring: integer("recurring").notNull(),
-  new: integer("new").notNull(),
-  expansion: integer("expansion").notNull(),
-  churn: integer("churn").notNull(),
-})
