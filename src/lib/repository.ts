@@ -1,20 +1,39 @@
 import "server-only"
 
 import { unstable_cache, updateTag } from "next/cache"
-import { desc, eq } from "drizzle-orm"
+import { desc, eq, max } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
-import { listRecentInvoices, stripeEnabled } from "@/lib/stripe/client"
-import { mapInvoice } from "@/lib/stripe/map"
+import { ghl } from "@/lib/ghl/client"
+import {
+  listCustomers,
+  listRecentInvoices,
+  stripeEnabled,
+  summarizeSubscriptions,
+} from "@/lib/stripe/client"
+import { mapInvoice, toMxn } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
   Client,
+  ClientDetail,
+  ClientOpportunity,
+  ClientRow,
   Currency,
   Implementation,
   Invoice,
   InvoiceRow,
+  LocationOption,
   RevenuePoint,
+  StripeCustomerOption,
+  StripeLink,
+} from "@/lib/types"
+
+export type {
+  ClientDetail,
+  ClientRow,
+  LocationOption,
+  StripeCustomerOption,
 } from "@/lib/types"
 
 /**
@@ -24,7 +43,10 @@ import type {
 
 export async function listClients(): Promise<Client[]> {
   if (!db) return demo.clients
-  return (await db.select().from(schema.clients)) as Client[]
+  return (await db
+    .select()
+    .from(schema.clients)
+    .orderBy(schema.clients.name)) as Client[]
 }
 
 export async function getClient(slug: string): Promise<Client | undefined> {
@@ -35,6 +57,19 @@ export async function getClient(slug: string): Promise<Client | undefined> {
     .where(eq(schema.clients.slug, slug))
     .limit(1)
   return row as Client | undefined
+}
+
+export async function listStripeLinks(): Promise<StripeLink[]> {
+  if (!db) return demo.stripeLinks
+  return (await db.select().from(schema.clientStripeCustomers)) as StripeLink[]
+}
+
+export async function lastSyncAt(): Promise<string | null> {
+  if (!db) return demo.clients[0]?.syncedAt ?? null
+  const [row] = await db
+    .select({ at: max(schema.clients.syncedAt) })
+    .from(schema.clients)
+  return row?.at ?? null
 }
 
 export async function listImplementations(): Promise<Implementation[]> {
@@ -62,6 +97,224 @@ export function usdToMxnRate(): number | null {
 export function baseCurrency(): Currency {
   return process.env.STRIPE_SECRET_KEY ? "mxn" : "usd"
 }
+
+/* ------------------------------------------------------ Stripe (cacheado) */
+
+/**
+ * La lista de clientes de Stripe y sus suscripciones cambian poco y pesan:
+ * cinco minutos bajo el mismo tag que las facturas, para que "Actualizar"
+ * refresque todo junto.
+ */
+const cachedStripeCustomers = unstable_cache(
+  async () => {
+    const [customers, subs] = await Promise.all([
+      listCustomers(),
+      summarizeSubscriptions(),
+    ])
+    return customers.map((c) => ({
+      id: c.id,
+      name: c.name?.trim() || c.email || c.id,
+      email: c.email ?? null,
+      phone: c.phone ?? null,
+      subscriptions: subs.get(c.id) ?? [],
+    }))
+  },
+  ["stripe-customers"],
+  { revalidate: 300, tags: ["stripe"] },
+)
+
+type StripeCustomerSummary = Awaited<
+  ReturnType<typeof cachedStripeCustomers>
+>[number]
+
+/** Centavos en moneda base, o `null` si ninguna suscripción se puede convertir. */
+function mrrOf(
+  subs: { amount: number; currency: Currency }[],
+  base: Currency,
+  fx: number | null,
+) {
+  let total: number | null = null
+  for (const s of subs) {
+    const v =
+      base === "mxn"
+        ? toMxn(s.amount, s.currency, fx)
+        : s.currency === "usd"
+          ? s.amount
+          : null
+    if (v === null) continue
+    total = (total ?? 0) + v
+  }
+  return total
+}
+
+async function stripeCustomersOrNull(): Promise<{
+  list: StripeCustomerSummary[]
+  error: string | null
+}> {
+  if (!stripeEnabled()) return { list: [], error: "Falta STRIPE_SECRET_KEY" }
+  try {
+    return { list: await cachedStripeCustomers(), error: null }
+  } catch (error) {
+    console.error("Stripe no respondió", error)
+    return { list: [], error: "Stripe no respondió" }
+  }
+}
+
+/** Clientes de Stripe que nadie tiene todavía, para el desplegable de la ficha. */
+export async function listStripeCustomerOptions(): Promise<{
+  options: StripeCustomerOption[]
+  error: string | null
+}> {
+  const [{ list, error }, links] = await Promise.all([
+    stripeCustomersOrNull(),
+    listStripeLinks(),
+  ])
+  const linked = new Set(links.map((l) => l.stripeCustomerId))
+  const base = baseCurrency()
+  const fx = usdToMxnRate()
+  const options = list
+    .filter((c) => !linked.has(c.id))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      active: c.subscriptions.length > 0,
+      mrr: mrrOf(c.subscriptions, base, fx),
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.active) - Number(a.active) ||
+        a.name.localeCompare(b.name, "es"),
+    )
+  return { options, error }
+}
+
+/* ---------------------------------------------------------- GHL locations */
+
+const cachedLocations = unstable_cache(
+  async () => {
+    const all = await ghl.listAllLocations()
+    return all.map((l) => ({
+      id: l.id,
+      name: l.name.trim(),
+      email: l.email ?? null,
+    }))
+  },
+  ["ghl-locations"],
+  { revalidate: 3600, tags: ["ghl-locations"] },
+)
+
+export async function listLocationOptions(): Promise<{
+  options: LocationOption[]
+  error: string | null
+}> {
+  if (!ghl.isConfigured) return { options: [], error: "Falta GHL_API_KEY" }
+  try {
+    const options = await cachedLocations()
+    return {
+      options: options.sort((a, b) => a.name.localeCompare(b.name, "es")),
+      error: null,
+    }
+  } catch (error) {
+    console.error("GHL no respondió", error)
+    return { options: [], error: "GoHighLevel no respondió" }
+  }
+}
+
+/* ----------------------------------------------------------------- vistas */
+
+export async function listClientRows(): Promise<ClientRow[]> {
+  const [clients, links, { list: stripe }, { options: locations }] =
+    await Promise.all([
+      listClients(),
+      listStripeLinks(),
+      stripeCustomersOrNull(),
+      listLocationOptions(),
+    ])
+  const base = baseCurrency()
+  const fx = usdToMxnRate()
+  const stripeById = new Map(stripe.map((c) => [c.id, c]))
+  const locationById = new Map(locations.map((l) => [l.id, l.name]))
+  const linksByClient = new Map<string, StripeLink[]>()
+  for (const l of links) {
+    linksByClient.set(l.clientId, [...(linksByClient.get(l.clientId) ?? []), l])
+  }
+
+  return clients.map((c) => {
+    const mine = linksByClient.get(c.id) ?? []
+    const subs = mine.flatMap(
+      (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
+    )
+    return {
+      ...c,
+      locationName: c.ghlLocationId
+        ? (locationById.get(c.ghlLocationId) ?? c.ghlLocationId)
+        : null,
+      stripeCount: mine.length,
+      mrr: mrrOf(subs, base, fx),
+    }
+  })
+}
+
+export async function getClientDetail(
+  slug: string,
+): Promise<ClientDetail | undefined> {
+  const client = await getClient(slug)
+  if (!client) return undefined
+
+  const [opportunities, links, { list: stripe }, { options: locations }] =
+    await Promise.all([
+      db
+        ? (db
+            .select()
+            .from(schema.clientOpportunities)
+            .where(eq(schema.clientOpportunities.clientId, client.id))
+            .orderBy(desc(schema.clientOpportunities.wonAt)) as Promise<
+            ClientOpportunity[]
+          >)
+        : Promise.resolve(
+            demo.clientOpportunities.filter((o) => o.clientId === client.id),
+          ),
+      listStripeLinks(),
+      stripeCustomersOrNull(),
+      listLocationOptions(),
+    ])
+  const base = baseCurrency()
+  const fx = usdToMxnRate()
+  const stripeById = new Map(stripe.map((c) => [c.id, c]))
+  const mine = links.filter((l) => l.clientId === client.id)
+  const stripeRows = mine.map((l) => {
+    const c = stripeById.get(l.stripeCustomerId)
+    return {
+      ...l,
+      name: c?.name ?? l.stripeCustomerId,
+      email: c?.email ?? null,
+      active: (c?.subscriptions.length ?? 0) > 0,
+      mrr: c ? mrrOf(c.subscriptions, base, fx) : null,
+    }
+  })
+  return {
+    client,
+    opportunities,
+    stripe: stripeRows,
+    location: client.ghlLocationId
+      ? (locations.find((l) => l.id === client.ghlLocationId) ?? {
+          id: client.ghlLocationId,
+          name: client.ghlLocationId,
+          email: null,
+        })
+      : null,
+    mrr: mrrOf(
+      mine.flatMap(
+        (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
+      ),
+      base,
+      fx,
+    ),
+  }
+}
+
+/* ------------------------------------------------------------ facturación */
 
 /** Las filas de Neon y del demo son dólares enteros ligados a un cliente. */
 export function rowToInvoice(
@@ -150,10 +403,10 @@ export async function getBillingFeed() {
     return { invoices, source, stale: false, usdToMxn, baseCurrency: base }
   }
 
-  const clients = await listClients()
-  const pares = clients
-    .filter((c) => c.stripeCustomerId)
-    .map((c) => [c.stripeCustomerId as string, c.id] as [string, string])
+  // Un cliente puede tener varios cus_; cada uno apunta al mismo clientId.
+  const links = await listStripeLinks()
+  const pares = links
+    .map((l) => [l.stripeCustomerId, l.clientId] as [string, string])
     .sort(([a], [b]) => a.localeCompare(b))
 
   try {
@@ -202,17 +455,26 @@ export async function listRevenue(): Promise<RevenuePoint[]> {
 
 /** Everything the dashboard's telemetry band reports, computed once. */
 export async function getPortfolioSummary() {
-  const [clients, implementations, invoices, revenue] = await Promise.all([
-    listClients(),
+  const [rows, implementations, invoices, revenue] = await Promise.all([
+    listClientRows(),
     listImplementations(),
     listInvoices(),
     listRevenue(),
   ])
 
-  const active = clients.filter((c) => c.status !== "churned")
-  const mrr = active.reduce((sum, c) => sum + c.mrr, 0)
-  const previous = revenue.at(-2)?.recurring ?? mrr
-  const mrrDelta = previous ? ((mrr - previous) / previous) * 100 : 0
+  const clients: Client[] = rows
+  const active = rows.filter((c) => !c.orphaned)
+  // Con Stripe, el MRR son las suscripciones activas de los cus_ enlazados.
+  // Sin él no hay fuente real: se usa la serie `revenue` (dólares enteros del
+  // demo), que es lo único comparable mes a mes.
+  const withStripe = stripeEnabled()
+  const latest = revenue.at(-1)?.recurring ?? 0
+  const previous = revenue.at(-2)?.recurring ?? 0
+  const mrr = withStripe
+    ? active.reduce((sum, c) => sum + (c.mrr ?? 0), 0)
+    : latest * 100
+  const mrrDelta =
+    !withStripe && previous ? ((latest - previous) / previous) * 100 : 0
 
   const outstanding = invoices
     .filter((i) => i.status === "overdue" || i.status === "due")
@@ -222,25 +484,23 @@ export async function getPortfolioSummary() {
 
   const inFlight = implementations.filter((i) => i.stage !== "live")
   const blocked = implementations.filter((i) => i.blocked)
-  const atRisk = clients.filter((c) => c.status === "at_risk")
+  const unlinked = active.filter((c) => c.stripeCount === 0 || !c.ghlLocationId)
 
   return {
     baseCurrency: baseCurrency(),
     clients,
+    rows,
     implementations,
     invoices,
     revenue,
     mrr,
     mrrDelta,
+    showMrrDelta: !withStripe,
     activeCount: active.length,
     outstanding,
     overdueCount,
     inFlightCount: inFlight.length,
     blockedCount: blocked.length,
-    atRisk,
-    /** Seat-weighted average health across everything still paying us. */
-    health: active.length
-      ? Math.round(active.reduce((s, c) => s + c.health, 0) / active.length)
-      : 0,
+    unlinked,
   }
 }

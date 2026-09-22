@@ -6,7 +6,6 @@ import { ThemeToggle } from "@/components/shell/theme-toggle"
 import { COPILOT_MODEL, usingDirectAnthropic } from "@/lib/ai/agent"
 import { hasDatabase } from "@/db"
 import { ghl } from "@/lib/ghl/client"
-import { listClients } from "@/lib/repository"
 import { cn } from "@/lib/utils"
 
 export const metadata = { title: "Ajustes" }
@@ -18,15 +17,19 @@ const approvalTools = new Set([
 ])
 
 export default async function AjustesPage() {
-  const clients = await listClients()
-  const team = [...new Set(clients.map((c) => c.owner))].sort()
-
   const connections = [
     {
       name: "GoHighLevel",
       variable: "GHL_API_KEY",
       ready: ghl.isConfigured,
       detail: "Token de agencia para leer y escribir en las subcuentas.",
+    },
+    {
+      name: "GoHighLevel · subcuenta Lezgo Suite",
+      variable: "GHL_LEZGO_SUITE_TOKEN",
+      ready: Boolean(process.env.GHL_LEZGO_SUITE_TOKEN),
+      detail:
+        "Token privado de la subcuenta. De ahí salen los clientes (oportunidades ganadas).",
     },
     {
       name: "Base de datos Neon",
@@ -179,27 +182,6 @@ export default async function AjustesPage() {
         </Instrument>
 
         <div className="space-y-4">
-          <Instrument label="Equipo" hint="Responsables de cuenta activos">
-            <ul className="divide-y divide-border">
-              {team.map((name) => {
-                const load = clients.filter(
-                  (c) => c.owner === name && c.status !== "churned",
-                )
-                return (
-                  <li
-                    key={name}
-                    className="flex items-center justify-between gap-3 px-4 py-2.5"
-                  >
-                    <span className="text-sm">{name}</span>
-                    <span className="num text-xs text-muted-foreground">
-                      {load.length} cuentas
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          </Instrument>
-
           <Instrument label="Apariencia" hint="Se guarda en este navegador">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <p className="text-sm text-muted-foreground">

@@ -2,6 +2,8 @@ import "server-only"
 
 import Stripe from "stripe"
 
+import type { Currency } from "@/lib/types"
+
 /**
  * Única superficie hacia Stripe, con el mismo papel que `ghl/client.ts` tiene
  * para GoHighLevel: auth, forma de error y paginación resueltos en un solo
@@ -77,4 +79,37 @@ export async function listCustomers() {
   } catch (error) {
     wrap(error, "/v1/customers")
   }
+}
+
+/**
+ * Suscripciones activas agrupadas por cliente y llevadas a mes: una anual
+ * cuenta por su doceava parte. Solo mes y año; semana y día no se usan aquí.
+ */
+export async function summarizeSubscriptions() {
+  const subs = await listActiveSubscriptions()
+  const out = new Map<string, { amount: number; currency: Currency }[]>()
+  for (const s of subs) {
+    const cus = typeof s.customer === "string" ? s.customer : s.customer.id
+    for (const item of s.items.data) {
+      const price = item.price
+      const unit = price.unit_amount ?? 0
+      const qty = item.quantity ?? 1
+      const rec = price.recurring
+      if (!rec || unit === 0) continue
+      const c = price.currency.toLowerCase()
+      if (c !== "mxn" && c !== "usd") continue
+      const perMonth =
+        rec.interval === "month"
+          ? (unit * qty) / rec.interval_count
+          : rec.interval === "year"
+            ? (unit * qty) / (12 * rec.interval_count)
+            : 0
+      if (!perMonth) continue
+      out.set(cus, [
+        ...(out.get(cus) ?? []),
+        { amount: Math.round(perMonth), currency: c },
+      ])
+    }
+  }
+  return out
 }

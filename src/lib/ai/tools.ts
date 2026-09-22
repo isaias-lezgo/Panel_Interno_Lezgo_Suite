@@ -46,7 +46,7 @@ async function attempt<T>(run: () => Promise<T>) {
 export const panelTools = {
   portfolioSummary: tool({
     description:
-      "Current agency numbers: MRR, active clients, outstanding invoices, in-flight and blocked implementations, average health.",
+      "Current agency numbers: MRR (cents, base currency), active clients, outstanding invoices, in-flight and blocked implementations, clients pending a Stripe or sub-account link.",
     inputSchema: z.object({}),
     execute: async () => {
       const s = await getPortfolioSummary()
@@ -58,32 +58,36 @@ export const panelTools = {
         overdueInvoices: s.overdueCount,
         implementationsInFlight: s.inFlightCount,
         implementationsBlocked: s.blockedCount,
-        clientsAtRisk: s.atRisk.map((c) => c.name),
-        averageHealth: s.health,
+        baseCurrency: s.baseCurrency,
+        unlinkedClients: s.unlinked.map((c) => c.name),
       }
     },
   }),
 
   findClients: tool({
     description:
-      "Look up clients in the panel by name, status, plan or account manager.",
+      "Look up clients in the panel by name, contact, email or pipeline stage.",
     inputSchema: z.object({
-      query: z.string().optional().describe("Matches name or industry."),
-      status: z
-        .enum(["live", "onboarding", "at_risk", "churned"])
-        .optional(),
-      owner: z.string().optional().describe("Account manager name."),
+      query: z
+        .string()
+        .optional()
+        .describe("Matches company, contact name or email."),
+      stage: z
+        .string()
+        .optional()
+        .describe("Pipeline stage name, partial match."),
     }),
-    execute: async ({ query, status, owner }) => {
+    execute: async ({ query, stage }) => {
       const all = await listClients()
       const q = query?.toLowerCase()
+      const s = stage?.toLowerCase()
       return all.filter(
         (c) =>
           (!q ||
             c.name.toLowerCase().includes(q) ||
-            c.industry.toLowerCase().includes(q)) &&
-          (!status || c.status === status) &&
-          (!owner || c.owner.toLowerCase().includes(owner.toLowerCase())),
+            c.contactName.toLowerCase().includes(q) ||
+            (c.email ?? "").toLowerCase().includes(q)) &&
+          (!s || c.stage.toLowerCase().includes(s)),
       )
     },
   }),

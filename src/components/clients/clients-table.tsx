@@ -4,8 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { SearchIcon } from "lucide-react"
 
-import { SignalMeter, toneForHealth } from "@/components/signal/signal-meter"
-import { clientStatusLabel, StatusChip } from "@/components/signal/status-chip"
+import { stageTone, StatusChip } from "@/components/signal/status-chip"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -22,54 +21,54 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { money, relativeDays, shortDate } from "@/lib/format"
-import type { Client, ClientStatus } from "@/lib/types"
+import { money, shortDate } from "@/lib/format"
+import type { ClientRow, Currency } from "@/lib/types"
 
-const statusFilterLabel: Record<string, string> = {
-  todos: "Todos los estados",
-  live: "Activo",
-  onboarding: "Onboarding",
-  at_risk: "En riesgo",
-  churned: "Baja",
+type Filter = "todos" | "sin_enlazar" | "huerfanos"
+type SortKey = "mrr" | "name" | "wonAt"
+
+const filterLabel: Record<Filter, string> = {
+  todos: "Todos",
+  sin_enlazar: "Sin enlazar",
+  huerfanos: "Sin oportunidad",
 }
 
-const sortFilterLabel: Record<string, string> = {
+const sortLabel: Record<SortKey, string> = {
   mrr: "Mayor MRR",
-  health: "Mejor salud",
   name: "Nombre A–Z",
-  renewsAt: "Próxima renovación",
+  wonAt: "Cierre más reciente",
 }
 
-const planLabel: Record<Client["plan"], string> = {
-  launch: "Launch",
-  scale: "Scale",
-  enterprise: "Enterprise",
-}
-
-type SortKey = "mrr" | "health" | "name" | "renewsAt"
-
-export function ClientsTable({ clients }: { clients: Client[] }) {
+export function ClientsTable({
+  clients,
+  currency,
+}: {
+  clients: ClientRow[]
+  currency: Currency
+}) {
   const [query, setQuery] = useState("")
-  const [status, setStatus] = useState<ClientStatus | "todos">("todos")
+  const [filter, setFilter] = useState<Filter>("todos")
   const [sort, setSort] = useState<SortKey>("mrr")
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
     return clients
-      .filter(
-        (c) =>
-          (status === "todos" || c.status === status) &&
-          (!q ||
-            c.name.toLowerCase().includes(q) ||
-            c.industry.toLowerCase().includes(q) ||
-            c.owner.toLowerCase().includes(q)),
-      )
+      .filter((c) => {
+        if (filter === "sin_enlazar" && c.stripeCount > 0 && c.ghlLocationId) {
+          return false
+        }
+        if (filter === "huerfanos" && !c.orphaned) return false
+        if (!q) return true
+        return [c.name, c.contactName, c.email ?? "", c.locationName ?? ""].some(
+          (s) => s.toLowerCase().includes(q),
+        )
+      })
       .sort((a, b) => {
         if (sort === "name") return a.name.localeCompare(b.name, "es")
-        if (sort === "renewsAt") return a.renewsAt.localeCompare(b.renewsAt)
-        return b[sort] - a[sort]
+        if (sort === "wonAt") return b.wonAt.localeCompare(a.wonAt)
+        return (b.mrr ?? -1) - (a.mrr ?? -1)
       })
-  }, [clients, query, status, sort])
+  }, [clients, query, filter, sort])
 
   return (
     <div>
@@ -82,39 +81,35 @@ export function ClientsTable({ clients }: { clients: Client[] }) {
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar por nombre, sector o responsable"
+            placeholder="Buscar por empresa, contacto, correo o subcuenta"
             aria-label="Buscar clientes"
             className="h-8 pl-8 text-sm"
           />
         </div>
 
-        <Select
-          value={status}
-          onValueChange={(value) => setStatus(value as ClientStatus | "todos")}
-        >
-          <SelectTrigger size="sm" className="w-40" aria-label="Filtrar por estado">
-            <SelectValue>
-              {(value: string) => statusFilterLabel[value]}
-            </SelectValue>
+        <Select value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+          <SelectTrigger size="sm" className="w-40" aria-label="Filtrar clientes">
+            <SelectValue>{(v: string) => filterLabel[v as Filter]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="todos">Todos los estados</SelectItem>
-            <SelectItem value="live">Activo</SelectItem>
-            <SelectItem value="onboarding">Onboarding</SelectItem>
-            <SelectItem value="at_risk">En riesgo</SelectItem>
-            <SelectItem value="churned">Baja</SelectItem>
+            {(Object.keys(filterLabel) as Filter[]).map((k) => (
+              <SelectItem key={k} value={k}>
+                {filterLabel[k]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
-        <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
-          <SelectTrigger size="sm" className="w-40" aria-label="Ordenar clientes">
-            <SelectValue>{(value: string) => sortFilterLabel[value]}</SelectValue>
+        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+          <SelectTrigger size="sm" className="w-44" aria-label="Ordenar clientes">
+            <SelectValue>{(v: string) => sortLabel[v as SortKey]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="mrr">Mayor MRR</SelectItem>
-            <SelectItem value="health">Mejor salud</SelectItem>
-            <SelectItem value="name">Nombre A–Z</SelectItem>
-            <SelectItem value="renewsAt">Próxima renovación</SelectItem>
+            {(Object.keys(sortLabel) as SortKey[]).map((k) => (
+              <SelectItem key={k} value={k}>
+                {sortLabel[k]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -133,72 +128,62 @@ export function ClientsTable({ clients }: { clients: Client[] }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Cliente</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Plan</TableHead>
+                <TableHead>Etapa</TableHead>
+                <TableHead>Subcuenta GHL</TableHead>
+                <TableHead>Stripe</TableHead>
                 <TableHead className="text-right">MRR</TableHead>
-                <TableHead>Salud</TableHead>
-                <TableHead>Responsable</TableHead>
-                <TableHead>Renueva</TableHead>
-                <TableHead>Subcuenta</TableHead>
+                <TableHead>Cerrado</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((client) => {
-                const state = clientStatusLabel[client.status]
-                return (
-                  <TableRow key={client.id} className="group">
-                    <TableCell>
-                      <Link
-                        href={`/clientes/${client.slug}`}
-                        className="block min-w-44"
-                      >
-                        <span className="font-medium group-hover:text-primary">
-                          {client.name}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {client.industry} · {client.seats} usuarios
-                        </span>
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <StatusChip tone={state.tone}>{state.label}</StatusChip>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {planLabel[client.plan]}
-                    </TableCell>
-                    <TableCell data-num className="text-right">
-                      {money(client.mrr * 100, "usd")}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <SignalMeter
-                          value={client.health}
-                          tone={toneForHealth(client.health)}
-                          segments={8}
-                          label={`Salud de ${client.name}: ${client.health} de 100`}
-                        />
-                        <span className="num text-xs text-muted-foreground">
-                          {client.health}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {client.owner}
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {shortDate(client.renewsAt)}
-                      <span className="block text-xs text-muted-foreground">
-                        {relativeDays(client.renewsAt)}
+              {rows.map((c) => (
+                <TableRow key={c.id} className="group">
+                  <TableCell>
+                    <Link href={`/clientes/${c.slug}`} className="block min-w-44">
+                      <span className="font-medium group-hover:text-primary">
+                        {c.name}
                       </span>
-                    </TableCell>
-                    <TableCell>
-                      <code className="num text-xs text-muted-foreground">
-                        {client.ghlLocationId}
-                      </code>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
+                      <span className="block text-xs text-muted-foreground">
+                        {c.contactName}
+                        {c.email ? ` · ${c.email}` : ""}
+                      </span>
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      <StatusChip tone={stageTone(c.stage)}>{c.stage}</StatusChip>
+                      {c.orphaned && (
+                        <StatusChip tone="idle">Sin oportunidad</StatusChip>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">
+                    {c.locationName ?? (
+                      <StatusChip tone="warn">Sin enlazar</StatusChip>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">
+                    {c.stripeCount > 0 ? (
+                      <span className="num">
+                        {c.stripeCount}{" "}
+                        {c.stripeCount === 1 ? "enlazado" : "enlazados"}
+                      </span>
+                    ) : (
+                      <StatusChip tone="warn">Sin enlazar</StatusChip>
+                    )}
+                  </TableCell>
+                  <TableCell data-num className="text-right">
+                    {c.mrr === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      money(c.mrr, currency)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">
+                    {shortDate(c.wonAt)}
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </div>

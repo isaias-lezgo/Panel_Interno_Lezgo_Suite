@@ -49,6 +49,45 @@ export type StripeLink = {
   linkedAt: string
 }
 
+/**
+ * Formas de vista que arma el repositorio. Viven aquí y no en
+ * `repository.ts` porque ese módulo es `server-only` y los componentes
+ * cliente necesitan importar los tipos.
+ */
+export type ClientRow = Client & {
+  locationName: string | null
+  stripeCount: number
+  /** Centavos en la moneda base; `null` si nada se pudo convertir. */
+  mrr: number | null
+}
+
+export type StripeCustomerOption = {
+  id: string
+  name: string
+  email: string | null
+  active: boolean
+  mrr: number | null
+}
+
+export type LocationOption = {
+  id: string
+  name: string
+  email: string | null
+}
+
+export type ClientDetail = {
+  client: Client
+  opportunities: ClientOpportunity[]
+  stripe: (StripeLink & {
+    name: string
+    email: string | null
+    active: boolean
+    mrr: number | null
+  })[]
+  location: LocationOption | null
+  mrr: number | null
+}
+
 export type ImplementationStage =
   | "scoping"
   | "building"

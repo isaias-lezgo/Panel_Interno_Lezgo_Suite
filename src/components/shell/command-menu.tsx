@@ -84,12 +84,12 @@ export function CommandMenu({ clients }: { clients: Client[] }) {
               {clients.map((client) => (
                 <CommandItem
                   key={client.id}
-                  value={`${client.name} ${client.industry}`}
+                  value={`${client.name} ${client.contactName}`}
                   onSelect={() => go(`/clientes/${client.slug}`)}
                 >
                   <span>{client.name}</span>
                   <span className="ml-auto text-xs text-muted-foreground">
-                    {client.industry}
+                    {client.contactName}
                   </span>
                 </CommandItem>
               ))}

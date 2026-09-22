@@ -1,6 +1,5 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react"
 
-import { SignalMeter, toneForHealth } from "@/components/signal/signal-meter"
 import { money, percent } from "@/lib/format"
 import type { Currency } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -18,7 +17,8 @@ export function TelemetryBand({
   outstanding,
   baseCurrency,
   overdueCount,
-  health,
+  unlinked,
+  showDelta,
 }: {
   mrr: number
   mrrDelta: number
@@ -28,7 +28,10 @@ export function TelemetryBand({
   outstanding: number
   baseCurrency: Currency
   overdueCount: number
-  health: number
+  /** Clientes activos sin Stripe o sin subcuenta enlazada. */
+  unlinked: number
+  /** La variación solo tiene sentido contra la serie del demo. */
+  showDelta: boolean
 }) {
   const up = mrrDelta >= 0
   const Arrow = up ? ArrowUpRight : ArrowDownRight
@@ -41,20 +44,23 @@ export function TelemetryBand({
       <Cell label="Ingreso recurrente" className="col-span-2 sm:col-span-1">
         <div className="flex items-baseline gap-2">
           <span className="num text-[26px] leading-none font-semibold">
-            {money(mrr * 100, "usd")}
+            {money(mrr, baseCurrency)}
           </span>
-          <span
-            className={cn(
-              "num inline-flex items-center gap-0.5 text-xs",
-              up ? "text-status-live" : "text-status-risk",
-            )}
-          >
-            <Arrow className="size-3" aria-hidden />
-            {percent(mrrDelta, 1)}
-          </span>
+          {showDelta && (
+            <span
+              className={cn(
+                "num inline-flex items-center gap-0.5 text-xs",
+                up ? "text-status-live" : "text-status-risk",
+              )}
+            >
+              <Arrow className="size-3" aria-hidden />
+              {percent(mrrDelta, 1)}
+            </span>
+          )}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          vs. mes anterior · {activeClients} cuentas activas
+          {showDelta ? "vs. mes anterior" : "suscripciones activas en Stripe"} ·{" "}
+          {activeClients} cuentas activas
         </p>
       </Cell>
 
@@ -63,7 +69,7 @@ export function TelemetryBand({
           {activeClients}
         </span>
         <p className="mt-2 text-xs text-muted-foreground">
-          en subcuentas de GoHighLevel
+          con oportunidad ganada en Lezgo Suite
         </p>
       </Cell>
 
@@ -99,14 +105,18 @@ export function TelemetryBand({
         </p>
       </Cell>
 
-      <Cell label="Salud de cartera">
-        <span className="num text-[26px] leading-none font-semibold">{health}</span>
-        <SignalMeter
-          value={health}
-          tone={toneForHealth(health)}
-          className="mt-2.5"
-          label={`Salud promedio de la cartera: ${health} de 100`}
-        />
+      <Cell label="Sin enlazar">
+        <span
+          className={cn(
+            "num text-[26px] leading-none font-semibold",
+            unlinked > 0 && "text-status-warn",
+          )}
+        >
+          {unlinked}
+        </span>
+        <p className="mt-2 text-xs text-muted-foreground">
+          clientes sin Stripe o sin subcuenta
+        </p>
       </Cell>
     </section>
   )

@@ -68,10 +68,20 @@ export type GhlOpportunity = {
   pipelineId: string
   pipelineStageId: string
   status: "open" | "won" | "lost" | "abandoned"
-  monetaryValue?: number
+  monetaryValue?: number | null
   contactId?: string
   assignedTo?: string
+  createdAt?: string
   updatedAt?: string
+  lastStatusChangeAt?: string | null
+  /** Solo lo devuelve `GET /opportunities/search`. */
+  contact?: {
+    id: string
+    name?: string | null
+    companyName?: string | null
+    email?: string | null
+    phone?: string | null
+  } | null
 }
 
 export type GhlLocation = {
@@ -226,23 +236,39 @@ export class GhlClient {
 
   /* ----------------------------------------------------------- opportunities */
 
+  /**
+   * `pipeline_id` va en snake_case aquí (verificado contra la API); el resto
+   * de campos de búsqueda no. La paginación es por cursor: `meta.startAfter`
+   * y `meta.startAfterId` de la respuesta anterior.
+   */
   searchOpportunities(params: {
     locationId?: string
     pipelineId?: string
     status?: GhlOpportunity["status"]
     limit?: number
+    startAfter?: number
+    startAfterId?: string
+    token?: string
   }) {
-    return this.request<{ opportunities: GhlOpportunity[] }>(
-      "/opportunities/search",
-      {
-        query: {
-          location_id: this.locationOrThrow(params.locationId),
-          pipelineId: params.pipelineId,
-          status: params.status,
-          limit: params.limit ?? 25,
-        },
+    return this.request<{
+      opportunities: GhlOpportunity[]
+      meta: {
+        total: number
+        startAfter?: number
+        startAfterId?: string
+        nextPageUrl?: string
+      }
+    }>("/opportunities/search", {
+      token: params.token,
+      query: {
+        location_id: this.locationOrThrow(params.locationId),
+        pipeline_id: params.pipelineId,
+        status: params.status,
+        limit: params.limit ?? 25,
+        startAfter: params.startAfter,
+        startAfterId: params.startAfterId,
       },
-    )
+    })
   }
 
   createOpportunity(input: {
@@ -281,10 +307,10 @@ export class GhlClient {
     )
   }
 
-  listPipelines(locationId?: string) {
+  listPipelines(locationId?: string, token?: string) {
     return this.request<{ pipelines: GhlPipeline[] }>(
       "/opportunities/pipelines",
-      { query: { locationId: this.locationOrThrow(locationId) } },
+      { token, query: { locationId: this.locationOrThrow(locationId) } },
     )
   }
 
@@ -295,6 +321,16 @@ export class GhlClient {
     return this.request<{ locations: GhlLocation[] }>("/locations/search", {
       query: { limit: params.limit ?? 50, skip: params.skip ?? 0 },
     })
+  }
+
+  /** Todas las subcuentas de la agencia. Pagina de 100 en 100 con `skip`. */
+  async listAllLocations() {
+    const all: GhlLocation[] = []
+    for (let skip = 0; ; skip += 100) {
+      const { locations } = await this.searchLocations({ limit: 100, skip })
+      all.push(...locations)
+      if (locations.length < 100) return all
+    }
   }
 
   getLocation(locationId?: string) {

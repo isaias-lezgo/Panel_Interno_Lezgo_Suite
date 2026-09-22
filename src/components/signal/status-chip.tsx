@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils"
-import type { ClientStatus, ImplementationStage, InvoiceStatus } from "@/lib/types"
+import type { ImplementationStage, InvoiceStatus } from "@/lib/types"
 
 /**
  * Status always ships as a dot plus a word. A colour on its own would fail
@@ -36,14 +36,14 @@ export function StatusChip({
   )
 }
 
-export const clientStatusLabel: Record<
-  ClientStatus,
-  { label: string; tone: "live" | "build" | "warn" | "risk" | "idle" }
-> = {
-  live: { label: "Activo", tone: "live" },
-  onboarding: { label: "Onboarding", tone: "build" },
-  at_risk: { label: "En riesgo", tone: "risk" },
-  churned: { label: "Baja", tone: "idle" },
+/** Las etapas del pipeline "Ventas" de Lezgo Suite, por nombre. Lo que no se reconoce va en gris. */
+export function stageTone(
+  stage: string,
+): "live" | "build" | "warn" | "risk" | "idle" {
+  const s = stage.toLowerCase()
+  if (s.includes("activo")) return "live"
+  if (s.includes("implementaci")) return "build"
+  return "idle"
 }
 
 export const stageLabel: Record<

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react"
+import { ArrowLeftIcon } from "lucide-react"
 
 import { LinkButton } from "@/components/panel/link-button"
 import {
@@ -7,14 +7,13 @@ import {
   Instrument,
   PageHeader,
 } from "@/components/panel/page-header"
-import { SignalMeter, toneForHealth } from "@/components/signal/signal-meter"
+import { SignalMeter } from "@/components/signal/signal-meter"
 import {
-  clientStatusLabel,
   invoiceStatusLabel,
   stageLabel,
+  stageTone,
   StatusChip,
 } from "@/components/signal/status-chip"
-import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -25,13 +24,12 @@ import {
 } from "@/components/ui/table"
 import { fullDate, money, relativeDays, shortDate } from "@/lib/format"
 import {
-  getClient,
+  baseCurrency,
+  getClientDetail,
   listActivity,
   listImplementations,
   listInvoices,
 } from "@/lib/repository"
-
-const planLabel = { launch: "Launch", scale: "Scale", enterprise: "Enterprise" }
 
 export async function generateMetadata({
   params,
@@ -39,8 +37,8 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  const client = await getClient(slug)
-  return { title: client?.name ?? "Cliente" }
+  const detail = await getClientDetail(slug)
+  return { title: detail?.client.name ?? "Cliente" }
 }
 
 export default async function ClientePage({
@@ -49,19 +47,20 @@ export default async function ClientePage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  const client = await getClient(slug)
-  if (!client) notFound()
+  const detail = await getClientDetail(slug)
+  if (!detail) notFound()
+  const { client, opportunities, stripe, location, mrr } = detail
 
   const [implementations, invoices, activity] = await Promise.all([
     listImplementations(),
     listInvoices(),
     listActivity(40),
   ])
+  const currency = baseCurrency()
 
   const work = implementations.filter((i) => i.clientId === client.id)
   const bills = invoices.filter((i) => i.clientId === client.id)
   const events = activity.filter((a) => a.clientId === client.id).slice(0, 6)
-  const state = clientStatusLabel[client.status]
   const owed = bills
     .filter((i) => i.status === "due" || i.status === "overdue")
     .reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
@@ -75,115 +74,133 @@ export default async function ClientePage({
       </div>
 
       <PageHeader
-        eyebrow={`${client.industry} · Plan ${planLabel[client.plan]}`}
+        eyebrow={client.orphaned ? "Sin oportunidad en GHL" : "Cliente"}
         title={client.name}
-        description={client.notes}
+        description={client.notes ?? undefined}
         className="pt-4"
         actions={
-          <>
-            <LinkButton href="/copiloto" variant="outline" size="sm">
-              Preguntar al copiloto
-            </LinkButton>
-            <Button
-              size="sm"
-              nativeButton={false}
-              render={
-                <a
-                  href={`https://app.gohighlevel.com/location/${client.ghlLocationId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                />
-              }
-            >
-              Abrir en GoHighLevel <ExternalLinkIcon />
-            </Button>
-          </>
+          <LinkButton href="/copiloto" variant="outline" size="sm">
+            Preguntar al copiloto
+          </LinkButton>
         }
       />
 
       <div className="space-y-4 px-4 pb-12 md:px-6">
-        <section className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3 sm:divide-x lg:grid-cols-6">
-          <Fact label="Estado">
-            <StatusChip tone={state.tone}>{state.label}</StatusChip>
+        <section className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3 sm:divide-x lg:grid-cols-5">
+          <Fact label="Etapa">
+            <StatusChip tone={stageTone(client.stage)}>{client.stage}</StatusChip>
           </Fact>
           <Fact label="MRR">
             <span className="num text-xl font-semibold">
-              {money(client.mrr * 100, "usd")}
+              {mrr === null ? "—" : money(mrr, currency)}
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              suscripciones activas en Stripe
             </span>
           </Fact>
-          <Fact label="Salud">
-            <span className="num text-xl font-semibold">{client.health}</span>
-            <SignalMeter
-              value={client.health}
-              tone={toneForHealth(client.health)}
-              className="mt-2"
-              label={`Salud de ${client.name}: ${client.health} de 100`}
-            />
-          </Fact>
-          <Fact label="Usuarios">
-            <span className="num text-xl font-semibold">{client.seats}</span>
+          <Fact label="Contacto">
+            <span className="text-sm">{client.contactName}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {client.email ?? "Sin correo"}
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {client.phone ?? "Sin teléfono"}
+            </span>
           </Fact>
           <Fact label="Cliente desde">
-            <span className="text-sm">{fullDate(client.startedAt)}</span>
+            <span className="text-sm">{fullDate(client.wonAt)}</span>
           </Fact>
-          <Fact label="Renueva">
-            <span className="text-sm">{fullDate(client.renewsAt)}</span>
+          <Fact label="Sincronizado">
+            <span className="text-sm">
+              {shortDate(client.syncedAt.slice(0, 10))}
+            </span>
             <span className="block text-xs text-muted-foreground">
-              {relativeDays(client.renewsAt)}
+              {relativeDays(client.syncedAt.slice(0, 10))}
             </span>
           </Fact>
         </section>
 
-        <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        <div className="grid gap-4 lg:grid-cols-2">
           <Instrument
-            label="Implementaciones"
-            hint={`${work.filter((i) => i.stage !== "live").length} en curso · ${work.length} en total`}
+            label="Subcuenta de GoHighLevel"
+            hint={location ? "Enlazada" : "Pendiente de enlazar"}
           >
-            {work.length === 0 ? (
-              <EmptyState title="Sin implementaciones registradas">
-                Cuando abras un proyecto para esta cuenta aparecerá aquí.
-              </EmptyState>
+            {location ? (
+              <dl className="divide-y divide-border">
+                <Row term="Subcuenta" detail={location.name} />
+                <Row term="Location ID" detail={location.id} mono />
+              </dl>
+            ) : (
+              <EmptyState title="Sin subcuenta enlazada" />
+            )}
+          </Instrument>
+
+          <Instrument
+            label="Clientes de Stripe"
+            hint={stripe.length ? `${stripe.length} enlazados` : "Pendiente de enlazar"}
+          >
+            {stripe.length === 0 ? (
+              <EmptyState title="Sin cliente de Stripe" />
             ) : (
               <ul className="divide-y divide-border">
-                {work.map((item) => {
-                  const stage = stageLabel[item.stage]
-                  return (
-                    <li key={item.id} className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">{item.name}</span>
-                        <StatusChip tone={stage.tone}>{stage.label}</StatusChip>
-                        {item.blocked && (
-                          <StatusChip tone="warn">Bloqueado</StatusChip>
-                        )}
-                      </div>
-                      <div className="mt-2 flex items-center gap-3">
-                        <SignalMeter
-                          value={item.progress}
-                          tone={item.blocked ? "warn" : "build"}
-                          label={`Avance de ${item.name}: ${item.progress}%`}
-                        />
-                        <span className="num text-xs text-muted-foreground">
-                          {item.progress}%
-                        </span>
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {item.owner} · entrega {relativeDays(item.dueAt)}
-                        </span>
-                      </div>
-                      {item.blocked && item.blockedReason && (
-                        <p className="mt-2 text-xs text-status-warn">
-                          {item.blockedReason}
-                        </p>
-                      )}
-                    </li>
-                  )
-                })}
+                {stripe.map((l) => (
+                  <li key={l.stripeCustomerId} className="px-4 py-3">
+                    <p className="text-sm font-medium">{l.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {l.email ?? "Sin correo"} ·{" "}
+                      <code className="num">{l.stripeCustomerId}</code>
+                    </p>
+                  </li>
+                ))}
               </ul>
+            )}
+          </Instrument>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+          <Instrument
+            label="Oportunidades ganadas"
+            hint={`${opportunities.length} en el pipeline Ventas`}
+          >
+            {opportunities.length === 0 ? (
+              <EmptyState title="Sin oportunidades" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Oportunidad</TableHead>
+                    <TableHead>Etapa</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead>Cierre</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {opportunities.map((o) => (
+                    <TableRow key={o.id}>
+                      <TableCell className="text-sm">{o.name}</TableCell>
+                      <TableCell>
+                        <StatusChip tone={stageTone(o.stageName)}>
+                          {o.stageName}
+                        </StatusChip>
+                      </TableCell>
+                      <TableCell data-num className="text-right">
+                        {money(o.monetaryValue * 100, "mxn")}
+                      </TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {shortDate(o.wonAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </Instrument>
 
           <Instrument
             label="Facturación"
-            hint={owed > 0 ? `${money(owed, "mxn")} pendiente` : "Sin saldo pendiente"}
+            hint={
+              owed > 0 ? `${money(owed, currency)} pendiente` : "Sin saldo pendiente"
+            }
           >
             {bills.length === 0 ? (
               <EmptyState title="Sin facturas" />
@@ -229,13 +246,50 @@ export default async function ClientePage({
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <Instrument label="Subcuenta de GoHighLevel" hint="Identificadores">
-            <dl className="divide-y divide-border">
-              <Row term="Location ID" detail={client.ghlLocationId} mono />
-              <Row term="Responsable" detail={client.owner} />
-              <Row term="Sector" detail={client.industry} />
-              <Row term="Plan" detail={planLabel[client.plan]} />
-            </dl>
+          <Instrument
+            label="Implementaciones"
+            hint={`${work.filter((i) => i.stage !== "live").length} en curso · ${work.length} en total`}
+          >
+            {work.length === 0 ? (
+              <EmptyState title="Sin implementaciones registradas">
+                Cuando abras un proyecto para esta cuenta aparecerá aquí.
+              </EmptyState>
+            ) : (
+              <ul className="divide-y divide-border">
+                {work.map((item) => {
+                  const stage = stageLabel[item.stage]
+                  return (
+                    <li key={item.id} className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">{item.name}</span>
+                        <StatusChip tone={stage.tone}>{stage.label}</StatusChip>
+                        {item.blocked && (
+                          <StatusChip tone="warn">Bloqueado</StatusChip>
+                        )}
+                      </div>
+                      <div className="mt-2 flex items-center gap-3">
+                        <SignalMeter
+                          value={item.progress}
+                          tone={item.blocked ? "warn" : "build"}
+                          label={`Avance de ${item.name}: ${item.progress}%`}
+                        />
+                        <span className="num text-xs text-muted-foreground">
+                          {item.progress}%
+                        </span>
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {item.owner} · entrega {relativeDays(item.dueAt)}
+                        </span>
+                      </div>
+                      {item.blocked && item.blockedReason && (
+                        <p className="mt-2 text-xs text-status-warn">
+                          {item.blockedReason}
+                        </p>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </Instrument>
 
           <Instrument label="Actividad de la cuenta" hint="Últimos movimientos">

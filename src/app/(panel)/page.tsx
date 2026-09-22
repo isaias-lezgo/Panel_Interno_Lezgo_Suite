@@ -67,13 +67,16 @@ export default async function TableroPage() {
           : "Stripe agotó los intentos de cobro.",
         href: "/facturacion",
       })),
-    ...summary.atRisk.map((c) => ({
+    ...summary.unlinked.slice(0, 5).map((c) => ({
       id: c.id,
-      tone: "risk" as const,
-      kind: "Cuenta en riesgo",
+      tone: "warn" as const,
+      kind: "Cliente sin enlazar",
       title: c.name,
-      client: c.owner,
-      detail: c.notes ?? `Salud ${c.health}/100.`,
+      client: c.contactName,
+      detail:
+        c.stripeCount === 0
+          ? "Sin cliente de Stripe."
+          : "Sin subcuenta de GoHighLevel.",
       href: `/clientes/${c.slug}`,
     })),
   ]
@@ -101,7 +104,8 @@ export default async function TableroPage() {
           blocked={summary.blockedCount}
           outstanding={summary.outstanding}
           overdueCount={summary.overdueCount}
-          health={summary.health}
+          unlinked={summary.unlinked.length}
+          showDelta={summary.showMrrDelta}
         />
 
         <div className="grid gap-4 lg:grid-cols-2">
