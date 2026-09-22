@@ -48,6 +48,7 @@ export async function linkStripeCustomer(
   const [taken] = await db
     .select({
       clientId: schema.clientStripeCustomers.clientId,
+      linkedBy: schema.clientStripeCustomers.linkedBy,
       name: schema.clients.name,
     })
     .from(schema.clientStripeCustomers)
@@ -56,26 +57,37 @@ export async function linkStripeCustomer(
       eq(schema.clients.id, schema.clientStripeCustomers.clientId),
     )
     .where(eq(schema.clientStripeCustomers.stripeCustomerId, customerId))
-  if (taken && taken.clientId !== clientId) {
+  if (taken && taken.linkedBy !== "excluded" && taken.clientId !== clientId) {
     return { ok: false, error: `Ya está enlazado a ${taken.name}.` }
+  }
+  // Una fila archivada se revive: el cus_ vuelve, ahora a quien lo eligió.
+  const fila = {
+    stripeCustomerId: customerId,
+    clientId,
+    linkedBy: "manual" as const,
+    linkedAt: new Date().toISOString(),
   }
   await db
     .insert(schema.clientStripeCustomers)
-    .values({
-      stripeCustomerId: customerId,
-      clientId,
-      linkedBy: "manual",
-      linkedAt: new Date().toISOString(),
+    .values(fila)
+    .onConflictDoUpdate({
+      target: schema.clientStripeCustomers.stripeCustomerId,
+      set: fila,
     })
-    .onConflictDoNothing()
   refresh()
   return { ok: true }
 }
 
+/**
+ * No borra la fila: la archiva. Quitar un enlace es una decisión, y la
+ * siguiente sincronización volvería a proponer el mismo `cus_` si no queda
+ * constancia de que ya se descartó.
+ */
 export async function unlinkStripeCustomer(customerId: string): Promise<Result> {
   if (!db) return { ok: false, error: NO_DB }
   await db
-    .delete(schema.clientStripeCustomers)
+    .update(schema.clientStripeCustomers)
+    .set({ linkedBy: "excluded" })
     .where(eq(schema.clientStripeCustomers.stripeCustomerId, customerId))
   refresh()
   return { ok: true }

@@ -173,21 +173,22 @@ export async function syncClientsFromGhl(): Promise<SyncResult> {
   }
 }
 
-/** Solo clientes sin ningún enlace; solo cus_ que nadie tiene. */
+/**
+ * Enlaza los `cus_` que nadie tiene, incluso a clientes que ya tienen otros:
+ * varios clientes pagan con más de una cuenta de Stripe. Un `cus_` con fila
+ * —enlazado o quitado a mano— no se vuelve a tocar.
+ */
 async function autoLinkStripe(drafts: ClientDraft[]) {
   if (!db || !stripeEnabled()) return 0
   const links = await db.select().from(schema.clientStripeCustomers)
-  const linkedCus = new Set(links.map((l) => l.stripeCustomerId))
-  const linkedClients = new Set(links.map((l) => l.clientId))
+  const conHistoria = new Set(links.map((l) => l.stripeCustomerId))
 
-  const subjects = drafts
-    .filter((d) => !linkedClients.has(d.id))
-    .map(toSubject)
+  const subjects = drafts.map(toSubject)
   if (!subjects.length) return 0
 
   const customers = await listCustomers()
   const targets: LinkTarget[] = customers
-    .filter((c) => !linkedCus.has(c.id))
+    .filter((c) => !conHistoria.has(c.id))
     .map((c) => ({
       id: c.id,
       name: c.name ?? null,

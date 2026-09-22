@@ -122,12 +122,21 @@ real (`acct_1LKAgaLSMWyOIdkA`):
   cobrar.
 - El concepto sale de la línea de **mayor importe**, no de `lines.data[0]`:
   Stripe a veces devuelve primero la línea del IVA.
+- La cuenta tiene más de **82 000 customers** y solo unos noventa han pagado
+  algo: GoHighLevel crea uno por cada contacto que pasa por un checkout, de
+  todas las subcuentas de la agencia, no solo de las nuestras. `listCustomers`
+  **no lista customers**: los deriva de facturas, suscripciones y cargos
+  (`src/lib/stripe/paying.ts`). Listarlos traía los 2 000 más recientes —casi
+  todos leads— y dejaba fuera a quien paga desde hace años.
 - Los precios los creó GoHighLevel (`price.metadata.created_by =
   "LeadConnector"`), pero el `location_id` de ahí es el de la agencia, no el
   de cada cliente: **no sirve para mapear**. El enlace vive en
   `client_stripe_customers` (un cliente, varios `cus_`): se llena solo al
   sincronizar cuando coincide correo, teléfono o nombre exacto, y lo demás se
-  elige a mano en la ficha del cliente.
+  elige a mano en la ficha del cliente. Un cliente puede tener varios `cus_`,
+  así que el enlace automático también corre sobre clientes que ya tienen
+  alguno. Quitar un enlace no borra la fila: la deja en `excluded` para que la
+  siguiente sincronización no vuelva a proponerlo.
 
 **Series del tablero.** Las dos gráficas se derivan de Stripe en
 `src/lib/stripe/series.ts`: "Cobrado por mes" de las facturas pagadas, y

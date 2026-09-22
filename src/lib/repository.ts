@@ -1,7 +1,7 @@
 import "server-only"
 
 import { unstable_cache, updateTag } from "next/cache"
-import { desc, eq, max } from "drizzle-orm"
+import { desc, eq, max, ne } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
@@ -71,9 +71,13 @@ export async function getClient(slug: string): Promise<Client | undefined> {
   return row as Client | undefined
 }
 
+/** Solo los enlaces vivos: los que se quitaron a mano quedan archivados. */
 export async function listStripeLinks(): Promise<StripeLink[]> {
   if (!db) return demo.stripeLinks
-  return (await db.select().from(schema.clientStripeCustomers)) as StripeLink[]
+  return (await db
+    .select()
+    .from(schema.clientStripeCustomers)
+    .where(ne(schema.clientStripeCustomers.linkedBy, "excluded"))) as StripeLink[]
 }
 
 export async function lastSyncAt(): Promise<string | null> {
@@ -225,9 +229,9 @@ export function baseCurrency(): Currency {
 /* ------------------------------------------------------ Stripe (cacheado) */
 
 /**
- * La lista de clientes de Stripe y sus suscripciones cambian poco y pesan:
- * cinco minutos bajo el mismo tag que las facturas, para que "Actualizar"
- * refresque todo junto.
+ * Quién paga en Stripe se deriva de todo el historial de cobros, así que
+ * cuesta unos segundos armarla. Cambia solo cuando alguien paga por primera
+ * vez: una hora de caché, y el botón "Actualizar" la tira antes si urge.
  */
 const cachedStripeCustomers = unstable_cache(
   async () => {
@@ -244,7 +248,7 @@ const cachedStripeCustomers = unstable_cache(
     }))
   },
   ["stripe-customers"],
-  { revalidate: 300, tags: ["stripe"] },
+  { revalidate: 3600, tags: ["stripe"] },
 )
 
 type StripeCustomerSummary = Awaited<

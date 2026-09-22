@@ -4,6 +4,12 @@ import Stripe from "stripe"
 
 import type { Currency } from "@/lib/types"
 
+import {
+  collectPayingCustomers,
+  type PayingCustomer,
+  type PayingSource,
+} from "./paying"
+
 /**
  * Única superficie hacia Stripe, con el mismo papel que `ghl/client.ts` tiene
  * para GoHighLevel: auth, forma de error y paginación resueltos en un solo
@@ -82,11 +88,73 @@ export async function listActiveSubscriptions() {
   }
 }
 
-export async function listCustomers() {
+/**
+ * Los clientes que alguna vez pagaron: se derivan de facturas, suscripciones
+ * y cargos en vez de listar customers. La cuenta tiene más de 82 000, casi
+ * todos contactos que GoHighLevel creó sin cobrarles nunca, y listarlos traía
+ * los más recientes —leads— dejando fuera a quien paga desde hace años.
+ * Ver `paying.ts`.
+ */
+export async function listCustomers(): Promise<PayingCustomer[]> {
   try {
-    return await stripe()
-      .customers.list({ limit: 100 })
-      .autoPagingToArray({ limit: 2000 })
+    const client = stripe()
+    const [invoices, subs, charges] = await Promise.all([
+      client.invoices.list({ limit: 100 }).autoPagingToArray({ limit: 5000 }),
+      client.subscriptions
+        .list({ status: "all", limit: 100 })
+        .autoPagingToArray({ limit: 2000 }),
+      client.charges.list({ limit: 100 }).autoPagingToArray({ limit: 5000 }),
+    ])
+
+    const id = (c: string | { id: string } | null | undefined) =>
+      typeof c === "string" ? c : (c?.id ?? null)
+
+    const sources: PayingSource[] = [
+      ...invoices.map((i) => ({
+        customer: id(i.customer),
+        name: i.customer_name,
+        email: i.customer_email,
+        phone: i.customer_phone,
+      })),
+      ...subs.map((x) => ({
+        customer: id(x.customer),
+        name: null,
+        email: null,
+        phone: null,
+      })),
+      ...charges.map((c) => ({
+        customer: id(c.customer),
+        name: c.billing_details?.name ?? null,
+        email: c.billing_details?.email ?? null,
+        phone: c.billing_details?.phone ?? null,
+      })),
+    ]
+
+    const { customers, incomplete } = collectPayingCustomers(sources)
+
+    // Los que solo aparecen en una suscripción no traen nombre: se piden
+    // directo. Son un puñado, así que una llamada por cabeza está bien.
+    const rellenos = await Promise.all(
+      incomplete.map(async (cus) => {
+        try {
+          const c = await client.customers.retrieve(cus)
+          return c.deleted ? null : c
+        } catch {
+          return null
+        }
+      }),
+    )
+    const porId = new Map(customers.map((c) => [c.id, c]))
+    for (const c of rellenos) {
+      if (!c) continue
+      const actual = porId.get(c.id)
+      if (!actual) continue
+      actual.name ??= c.name?.trim() || null
+      actual.email ??= c.email?.trim() || null
+      actual.phone ??= c.phone?.trim() || null
+    }
+
+    return [...porId.values()]
   } catch (error) {
     wrap(error, "/v1/customers")
   }

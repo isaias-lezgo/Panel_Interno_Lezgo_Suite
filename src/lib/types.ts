@@ -1,6 +1,10 @@
 /** Domain model for the Lezgo Suite control panel. */
 
-export type LinkedBy = "auto" | "manual"
+/**
+ * `excluded` es un enlace que alguien quitó a mano: la fila se queda para
+ * que la siguiente sincronización no vuelva a proponerlo sola.
+ */
+export type LinkedBy = "auto" | "manual" | "excluded"
 
 /**
  * Un cliente es un contacto de la subcuenta Lezgo Suite con al menos una
