@@ -1,25 +1,39 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { refresh } from "next/cache"
 import { eq } from "drizzle-orm"
 
 import { db, schema } from "@/db"
 import { syncClientsFromGhl, type SyncResult } from "@/lib/clients/sync"
+import { listStripeCustomerOptions } from "@/lib/repository"
+import type { StripeCustomerOption } from "@/lib/types"
 
 type Result = { ok: true } | { ok: false; error: string }
 
 const NO_DB = "Sin base de datos: los enlaces no se guardan en modo demo."
 
-function refresh() {
-  revalidatePath("/clientes", "layout")
-  revalidatePath("/")
-  revalidatePath("/facturacion")
-}
+/**
+ * Todas las acciones cierran con `refresh()` y no con `revalidatePath`: los
+ * enlaces se leen de Neon sin caché, así que no hay nada que invalidar — lo
+ * que falta es que el router del cliente vuelva a pedir la vista para que el
+ * cambio se vea sin recargar.
+ */
 
 export async function syncClients(): Promise<SyncResult> {
   const result = await syncClientsFromGhl()
   refresh()
   return result
+}
+
+/**
+ * Busca en los clientes de Stripe libres. La lista completa pasa de mil, así
+ * que el desplegable pregunta por lo que se escribe en vez de cargarla toda.
+ */
+export async function searchStripeCustomers(
+  query: string,
+): Promise<StripeCustomerOption[]> {
+  const { options } = await listStripeCustomerOptions(query)
+  return options
 }
 
 /** Un cus_ tiene un solo dueño: si ya está enlazado, se dice a quién. */

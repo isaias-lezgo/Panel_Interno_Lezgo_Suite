@@ -160,11 +160,13 @@ async function stripeCustomersOrNull(): Promise<{
   }
 }
 
-/** Clientes de Stripe que nadie tiene todavía, para el desplegable de la ficha. */
-export async function listStripeCustomerOptions(): Promise<{
-  options: StripeCustomerOption[]
-  error: string | null
-}> {
+/**
+ * Clientes de Stripe que nadie tiene todavía. La cuenta pasa de mil
+ * registros, así que el desplegable no los recibe todos: se sirve una
+ * primera página (los que pagan, arriba) y lo demás se busca contra el
+ * servidor conforme se escribe.
+ */
+export async function listStripeCustomerOptions(query = "", limit = 25) {
   const [{ list, error }, links] = await Promise.all([
     stripeCustomersOrNull(),
     listStripeLinks(),
@@ -172,8 +174,23 @@ export async function listStripeCustomerOptions(): Promise<{
   const linked = new Set(links.map((l) => l.stripeCustomerId))
   const base = baseCurrency()
   const fx = usdToMxnRate()
-  const options = list
-    .filter((c) => !linked.has(c.id))
+  // Sin acentos en ambos lados: quien busca "duran" espera ver "Durán".
+  const plano = (s: string) =>
+    s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+  const q = plano(query.trim())
+
+  const libres = list.filter(
+    (c) =>
+      !linked.has(c.id) &&
+      (!q ||
+        plano(c.name).includes(q) ||
+        plano(c.email ?? "").includes(q) ||
+        c.id.toLowerCase().includes(q)),
+  )
+  const options: StripeCustomerOption[] = libres
     .map((c) => ({
       id: c.id,
       name: c.name,
@@ -186,7 +203,7 @@ export async function listStripeCustomerOptions(): Promise<{
         Number(b.active) - Number(a.active) ||
         a.name.localeCompare(b.name, "es"),
     )
-  return { options, error }
+  return { options: options.slice(0, limit), total: libres.length, error }
 }
 
 /* ---------------------------------------------------------- GHL locations */
@@ -219,6 +236,24 @@ export async function listLocationOptions(): Promise<{
     console.error("GHL no respondió", error)
     return { options: [], error: "GoHighLevel no respondió" }
   }
+}
+
+/**
+ * Subcuentas que nadie tiene, más la del propio cliente. El desplegable no
+ * ofrece lo que ya es de otro: el error "esa subcuenta ya es de X" solo
+ * debería aparecer en una carrera entre dos pestañas.
+ */
+export async function listFreeLocationOptions(clientId?: string) {
+  const [{ options, error }, clients] = await Promise.all([
+    listLocationOptions(),
+    listClients(),
+  ])
+  const tomadas = new Set(
+    clients
+      .filter((c) => c.ghlLocationId && c.id !== clientId)
+      .map((c) => c.ghlLocationId as string),
+  )
+  return { options: options.filter((l) => !tomadas.has(l.id)), error }
 }
 
 /* ----------------------------------------------------------------- vistas */

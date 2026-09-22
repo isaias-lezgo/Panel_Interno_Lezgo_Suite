@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
+import { LocationLink } from "@/components/clients/location-link"
+import { StripeLinks } from "@/components/clients/stripe-links"
 import { LinkButton } from "@/components/panel/link-button"
 import {
   EmptyState,
@@ -29,6 +31,8 @@ import {
   listActivity,
   listImplementations,
   listInvoices,
+  listFreeLocationOptions,
+  listStripeCustomerOptions,
 } from "@/lib/repository"
 
 export async function generateMetadata({
@@ -51,11 +55,14 @@ export default async function ClientePage({
   if (!detail) notFound()
   const { client, opportunities, stripe, location, mrr } = detail
 
-  const [implementations, invoices, activity] = await Promise.all([
-    listImplementations(),
-    listInvoices(),
-    listActivity(40),
-  ])
+  const [implementations, invoices, activity, stripeOptions, locationOptions] =
+    await Promise.all([
+      listImplementations(),
+      listInvoices(),
+      listActivity(40),
+      listStripeCustomerOptions(),
+      listFreeLocationOptions(client.id),
+    ])
   const currency = baseCurrency()
 
   const work = implementations.filter((i) => i.clientId === client.id)
@@ -125,35 +132,26 @@ export default async function ClientePage({
             label="Subcuenta de GoHighLevel"
             hint={location ? "Enlazada" : "Pendiente de enlazar"}
           >
-            {location ? (
-              <dl className="divide-y divide-border">
-                <Row term="Subcuenta" detail={location.name} />
-                <Row term="Location ID" detail={location.id} mono />
-              </dl>
-            ) : (
-              <EmptyState title="Sin subcuenta enlazada" />
-            )}
+            <LocationLink
+              client={client}
+              location={location}
+              options={locationOptions.options}
+              optionsError={locationOptions.error}
+            />
           </Instrument>
 
           <Instrument
             label="Clientes de Stripe"
             hint={stripe.length ? `${stripe.length} enlazados` : "Pendiente de enlazar"}
           >
-            {stripe.length === 0 ? (
-              <EmptyState title="Sin cliente de Stripe" />
-            ) : (
-              <ul className="divide-y divide-border">
-                {stripe.map((l) => (
-                  <li key={l.stripeCustomerId} className="px-4 py-3">
-                    <p className="text-sm font-medium">{l.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {l.email ?? "Sin correo"} ·{" "}
-                      <code className="num">{l.stripeCustomerId}</code>
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <StripeLinks
+              clientId={client.id}
+              links={stripe}
+              options={stripeOptions.options}
+              optionsTotal={stripeOptions.total}
+              optionsError={stripeOptions.error}
+              currency={currency}
+            />
           </Instrument>
         </div>
 
@@ -325,23 +323,6 @@ function Fact({
     <div className="border-t border-border px-4 py-4 first:border-t-0 sm:border-t-0">
       <p className="eyebrow mb-2.5">{label}</p>
       {children}
-    </div>
-  )
-}
-
-function Row({
-  term,
-  detail,
-  mono,
-}: {
-  term: string
-  detail: string
-  mono?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-      <dt className="text-xs text-muted-foreground">{term}</dt>
-      <dd className={mono ? "num text-xs" : "text-sm"}>{detail}</dd>
     </div>
   )
 }
