@@ -66,7 +66,9 @@ src/
     clients/ implementations/ billing/ ai/
   lib/
     repository.ts       ÚNICA superficie de lectura de datos
+    clients/            Agrupación por contacto, auto-enlace y sync
     ghl/client.ts       Cliente tipado de la API v2 de GoHighLevel
+    ghl/lezgo-suite.ts  Cliente con el token de la subcuenta Lezgo Suite
     ai/agent.ts         Definición del agente + aprobaciones
     ai/tools.ts         Herramientas del copiloto
     format.ts nav.ts types.ts utils.ts
@@ -87,7 +89,11 @@ tipos. Detalles ya verificados contra la API real:
 - Base `https://services.leadconnectorhq.com`, header `Version: 2021-07-28`.
 - Los contactos se buscan con `POST /contacts/search` y el campo es
   **`pageLimit`**, no `limit`. Los nombres de campo van en camelCase.
-- `GET /opportunities/search` usa `pipelineId` en camelCase.
+- `GET /opportunities/search` usa `pipeline_id` en snake_case y pagina por
+  cursor con `startAfter`/`startAfterId` del `meta`.
+- El token de agencia **no** lee contactos ni oportunidades de una subcuenta
+  (401). Para la subcuenta Lezgo Suite hay un token propio,
+  `GHL_LEZGO_SUITE_TOKEN`, envuelto en `src/lib/ghl/lezgo-suite.ts`.
 - Al eliminar, la API responde `succeded` (así, con la errata).
 
 **Stripe.** Toda llamada pasa por `src/lib/stripe/client.ts`, y es **solo
@@ -111,7 +117,16 @@ real (`acct_1LKAgaLSMWyOIdkA`):
 - Los precios los creó GoHighLevel (`price.metadata.created_by =
   "LeadConnector"`), pero el `location_id` de ahí es el de la agencia, no el
   de cada cliente: **no sirve para mapear**. El enlace vive en
-  `clients.stripe_customer_id` y se llena con `pnpm stripe:map`.
+  `client_stripe_customers` (un cliente, varios `cus_`): se llena solo al
+  sincronizar cuando coincide correo, teléfono o nombre exacto, y lo demás se
+  elige a mano en la ficha del cliente.
+
+**Clientes.** Salen de las oportunidades **ganadas** del pipeline "Ventas" de
+la subcuenta Lezgo Suite, agrupadas por contacto (`src/lib/clients/`). La sync
+corre al apretar "Sincronizar con GHL" o sola si la última tiene más de una
+hora. Un cliente que deja de aparecer se marca `orphaned`, no se borra. Los
+enlaces —cliente de Stripe y subcuenta— son la única escritura del panel y van
+solo a Neon. Un `cus_` o una subcuenta que ya tiene dueño no se ofrece a otro.
 
 **Modelo.** `src/lib/ai/agent.ts` resuelve el modelo por dos caminos: con
 `ANTHROPIC_API_KEY` habla directo con Anthropic; sin ella usa el AI Gateway con
@@ -156,8 +171,7 @@ pnpm lint         # eslint
 pnpm db:push      # aplica el esquema a Neon
 pnpm db:seed      # carga src/data/demo.ts en Neon
 pnpm db:studio    # explorador de Drizzle
-pnpm test         # vitest: pruebas del mapeador de Stripe
-pnpm stripe:map   # propone enlaces cus_… ↔ cliente
+pnpm test         # vitest: mapeador de Stripe, agrupación y auto-enlace
 ```
 
 ## Variables de entorno
@@ -171,6 +185,8 @@ devuelven un error explicado en la interfaz.
 | `DATABASE_URL` | Rama de Neon de **este** proyecto |
 | `GHL_API_KEY` | Token de agencia de GoHighLevel |
 | `GHL_LOCATION_ID` | Subcuenta por defecto |
+| `GHL_LEZGO_SUITE_TOKEN` | Token privado de la subcuenta Lezgo Suite: de ahí salen los clientes |
+| `GHL_LEZGO_SUITE_LOCATION_ID` | Subcuenta Lezgo Suite (`uRFrk77agXq9is0a0gkp`) |
 | `ANTHROPIC_API_KEY` | Modelo del copiloto, directo a la API de Anthropic |
 | `AI_GATEWAY_API_KEY` | Alternativa: modelo vía Vercel AI Gateway (requiere créditos comprados) |
 | `COPILOT_MODEL` | Sobrescribe el modelo por defecto |
