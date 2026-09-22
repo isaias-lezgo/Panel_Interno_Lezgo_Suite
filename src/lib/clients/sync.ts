@@ -1,6 +1,6 @@
 import "server-only"
 
-import { eq, inArray } from "drizzle-orm"
+import { eq, inArray, max } from "drizzle-orm"
 
 import { db, schema } from "@/db"
 import { ghl, GhlError } from "@/lib/ghl/client"
@@ -18,6 +18,22 @@ import {
 } from "./group"
 import { autoLink, type LinkSubject, type LinkTarget } from "./match"
 import { planUpserts } from "./plan"
+
+const UNA_HORA = 60 * 60 * 1000
+
+/**
+ * La sync que corre sola al abrir la lista. Vive aquí y no en la página
+ * porque leer el reloj durante el render es impuro: el componente no puede
+ * decidir si los datos están frescos.
+ */
+export async function syncClientsIfStale(): Promise<SyncResult | null> {
+  if (!db || !lezgoSuiteEnabled()) return null
+  const [row] = await db
+    .select({ at: max(schema.clients.syncedAt) })
+    .from(schema.clients)
+  if (row?.at && Date.now() - new Date(row.at).getTime() < UNA_HORA) return null
+  return syncClientsFromGhl()
+}
 
 export type SyncResult =
   | {
