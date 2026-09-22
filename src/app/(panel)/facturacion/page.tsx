@@ -2,7 +2,9 @@ import { ClientRevenueChart } from "@/components/charts/client-revenue-chart"
 import { InvoicesTable } from "@/components/billing/invoices-table"
 import { RefreshButton } from "@/components/billing/refresh-button"
 import { Instrument, PageHeader } from "@/components/panel/page-header"
-import { money } from "@/lib/format"
+import { money, moneySigned } from "@/lib/format"
+import { splitByCurrency, type CurrencySplit } from "@/lib/stripe/totals"
+import type { Currency } from "@/lib/types"
 import { getBillingFeed, listClients, refreshBilling } from "@/lib/repository"
 
 export const metadata = { title: "Facturación" }
@@ -13,14 +15,19 @@ export default async function FacturacionPage() {
 
   const paid = invoices.filter((i) => i.status === "paid")
   const overdue = invoices.filter((i) => i.status === "overdue")
-  const collected = paid.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
-  const overdueTotal = overdue.reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
   const issued = invoices.filter(
     (i) => i.status !== "draft" && i.status !== "void",
   )
-  const outstanding = invoices
-    .filter((i) => i.status === "due" || i.status === "overdue")
-    .reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
+  const pendientes = invoices.filter(
+    (i) => i.status === "due" || i.status === "overdue",
+  )
+
+  // Cada KPI se parte por moneda: el número grande es lo cobrado en pesos de
+  // verdad y el pie declara lo que viene convertido desde otra moneda.
+  const cobrado = splitByCurrency(paid, baseCurrency)
+  const porCobrar = splitByCurrency(pendientes, baseCurrency)
+  const vencido = splitByCurrency(overdue, baseCurrency)
+  const collected = cobrado.total
 
   // Facturado real por cliente en la ventana, en centavos de la moneda base.
   // Antes esto salía de `client.mrr`, que son dólares de los datos de ejemplo:
@@ -72,27 +79,31 @@ export default async function FacturacionPage() {
         <section className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:divide-x lg:grid-cols-4">
           <Cell label="Cobrado">
             <span className="num text-[26px] leading-none font-semibold">
-              {money(collected, baseCurrency)}
+              {money(cobrado.exact, baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
-              {paid.length} facturas pagadas
+              {paid.length - cobrado.foreign.reduce((n, f) => n + f.count, 0)}{" "}
+              facturas pagadas en {baseCurrency.toUpperCase()}
             </p>
+            <Foreign split={cobrado} base={baseCurrency} />
           </Cell>
           <Cell label="Por cobrar">
             <span className="num text-[26px] leading-none font-semibold">
-              {money(outstanding, baseCurrency)}
+              {money(porCobrar.exact, baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               emitido y sin pagar
             </p>
+            <Foreign split={porCobrar} base={baseCurrency} />
           </Cell>
           <Cell label="Vencido">
             <span className="num text-[26px] leading-none font-semibold text-status-risk">
-              {money(overdueTotal, baseCurrency)}
+              {money(vencido.exact, baseCurrency)}
             </span>
             <p className="mt-2 text-xs text-muted-foreground">
               {overdue.length} facturas fuera de plazo
             </p>
+            <Foreign split={vencido} base={baseCurrency} />
           </Cell>
           <Cell label="Tasa de cobro">
             <span className="num text-[26px] leading-none font-semibold">
@@ -106,7 +117,7 @@ export default async function FacturacionPage() {
 
         <p className="px-1 text-xs text-muted-foreground">
           {feed.usdToMxn
-            ? `Las facturas en USD se convirtieron a ${feed.usdToMxn} MXN por dólar.`
+            ? `Las cifras grandes son lo cobrado en ${baseCurrency.toUpperCase()}, sin conversión de por medio. Lo que llegó en otra moneda se declara debajo y su equivalente es un estimado a ${feed.usdToMxn} MXN por dólar (STRIPE_FX_USD_MXN).`
             : feed.source === "stripe"
               ? "Hay facturas en USD fuera de los totales: falta configurar STRIPE_FX_USD_MXN."
               : "Importes en USD, tal como están en la base."}
@@ -196,6 +207,33 @@ function Concentration({
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * Lo que entró en otra moneda, debajo de la cifra medida. El equivalente va
+ * rotulado como estimado: sale de una tasa configurada a mano, no de lo que
+ * el banco liquidó ese día.
+ */
+function Foreign({ split, base }: { split: CurrencySplit; base: Currency }) {
+  if (split.foreign.length === 0) return null
+  return (
+    <div className="mt-1.5 space-y-0.5">
+      {split.foreign.map((f) => (
+        <p key={f.currency} className="text-xs text-muted-foreground">
+          <span className="num">
+            + {moneySigned(f.amount, f.currency, base)}
+          </span>{" "}
+          en {f.count} {f.count === 1 ? "factura" : "facturas"}
+          {f.converted !== null && (
+            <>
+              {" · "}
+              <span className="num">≈ {money(f.converted, base)}</span> estimado
+            </>
+          )}
+        </p>
+      ))}
     </div>
   )
 }
