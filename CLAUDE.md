@@ -82,6 +82,14 @@ src/
 entre los datos de ejemplo y Neon según exista `DATABASE_URL`. No consultes la
 base ni el demo directamente desde una página; agrega la función al repositorio.
 
+**Base de datos.** Neon suspende el compute tras unos minutos sin uso y
+despertarlo tarda ~18 s, más que los 10 s que el `fetch` de Node espera para
+conectar. El driver HTTP de Neon no reintenta, así que la primera visita tras
+un rato de silencio devolvía "Error connecting to database: fetch failed" y
+tumbaba la vista. `src/db/retry.ts` reintenta **solo los fallos de conexión**
+—los que ocurren antes de que la consulta salga, así que no pueden duplicar
+nada— y se engancha por `neonConfig.fetchFunction`.
+
 **GoHighLevel.** Toda llamada pasa por `src/lib/ghl/client.ts`. Si necesitas un
 endpoint que no está envuelto, usa `ghl.request()` y luego súbelo a método con
 tipos. Detalles ya verificados contra la API real:
