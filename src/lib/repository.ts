@@ -25,6 +25,7 @@ import {
 import { mapInvoice, toMxn } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
+  ChecklistItem,
   Client,
   ClientDetail,
   ClientOpportunity,
@@ -84,24 +85,50 @@ export async function lastSyncAt(): Promise<string | null> {
 }
 
 export async function listImplementations(): Promise<Implementation[]> {
-  if (!db) return demo.implementations.map((i) => ({ ...i, contacts: [] }))
-  const [rows, contacts] = await Promise.all([
+  if (!db) {
+    return demo.implementations.map((i) => ({
+      ...i,
+      contacts: [],
+      checklist: [],
+    }))
+  }
+  const [rows, contacts, items] = await Promise.all([
     db
       .select()
       .from(schema.implementations)
       .orderBy(desc(schema.implementations.updatedAt)),
     db.select().from(schema.implementationContacts),
+    db
+      .select()
+      .from(schema.implementationChecklistItems)
+      .orderBy(schema.implementationChecklistItems.position),
   ])
-  const byImplementation = new Map<string, ImplementationContact[]>()
+  const contactsOf = new Map<string, ImplementationContact[]>()
   for (const c of contacts) {
-    const list = byImplementation.get(c.implementationId) ?? []
+    const list = contactsOf.get(c.implementationId) ?? []
     list.push({ id: c.ghlContactId, name: c.name, email: c.email, phone: c.phone })
-    byImplementation.set(c.implementationId, list)
+    contactsOf.set(c.implementationId, list)
+  }
+  const itemsOf = new Map<string, ChecklistItem[]>()
+  for (const { implementationId, ...item } of items) {
+    itemsOf.set(implementationId, [...(itemsOf.get(implementationId) ?? []), item])
   }
   return rows.map((r) => ({
     ...(r as ImplementationRow),
-    contacts: byImplementation.get(r.id) ?? [],
+    contacts: contactsOf.get(r.id) ?? [],
+    checklist: orderChecklist(itemsOf.get(r.id) ?? []),
   }))
+}
+
+/** Cada punto principal seguido de sus sub-puntos, ambos por `position`. */
+function orderChecklist(items: ChecklistItem[]) {
+  const children = new Map<string, ChecklistItem[]>()
+  for (const i of items) {
+    if (i.parentId) children.set(i.parentId, [...(children.get(i.parentId) ?? []), i])
+  }
+  return items
+    .filter((i) => !i.parentId)
+    .flatMap((i) => [i, ...(children.get(i.id) ?? [])])
 }
 
 /* ------------------------------------------- contactos de Lezgo Suite */
@@ -224,13 +251,19 @@ type StripeCustomerSummary = Awaited<
   ReturnType<typeof cachedStripeCustomers>
 >[number]
 
-/** Centavos en moneda base, o `null` si ninguna suscripción se puede convertir. */
+/**
+ * Centavos en moneda base, o `null` si no hay ninguna suscripción activa o
+ * si ninguna se puede convertir. `unconverted` separa ambos casos: sin él,
+ * un cliente con todo cancelado se confunde con uno que cobra en una moneda
+ * que no sabemos convertir.
+ */
 function mrrOf(
   subs: { amount: number; currency: Currency }[],
   base: Currency,
   fx: number | null,
 ) {
   let total: number | null = null
+  let unconverted = 0
   for (const s of subs) {
     const v =
       base === "mxn"
@@ -238,10 +271,13 @@ function mrrOf(
         : s.currency === "usd"
           ? s.amount
           : null
-    if (v === null) continue
+    if (v === null) {
+      unconverted += 1
+      continue
+    }
     total = (total ?? 0) + v
   }
-  return total
+  return { total, unconverted }
 }
 
 async function stripeCustomersOrNull(): Promise<{
@@ -293,7 +329,7 @@ export async function listStripeCustomerOptions(query = "", limit = 25) {
       name: c.name,
       email: c.email,
       active: c.subscriptions.length > 0,
-      mrr: mrrOf(c.subscriptions, base, fx),
+      mrr: mrrOf(c.subscriptions, base, fx).total,
     }))
     .sort(
       (a, b) =>
@@ -377,13 +413,15 @@ export async function listClientRows(): Promise<ClientRow[]> {
     const subs = mine.flatMap(
       (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
     )
+    const { total, unconverted } = mrrOf(subs, base, fx)
     return {
       ...c,
       locationName: c.ghlLocationId
         ? (locationById.get(c.ghlLocationId) ?? c.ghlLocationId)
         : null,
       stripeCount: mine.length,
-      mrr: mrrOf(subs, base, fx),
+      mrr: total,
+      unconvertedSubs: unconverted,
     }
   })
 }
@@ -422,7 +460,7 @@ export async function getClientDetail(
       name: c?.name ?? l.stripeCustomerId,
       email: c?.email ?? null,
       active: (c?.subscriptions.length ?? 0) > 0,
-      mrr: c ? mrrOf(c.subscriptions, base, fx) : null,
+      mrr: c ? mrrOf(c.subscriptions, base, fx).total : null,
     }
   })
   return {
@@ -442,7 +480,7 @@ export async function getClientDetail(
       ),
       base,
       fx,
-    ),
+    ).total,
   }
 }
 
@@ -665,6 +703,7 @@ export async function getPortfolioSummary() {
   // ejemplo con aire de real.
   const mrr = active.reduce((sum, c) => sum + (c.mrr ?? 0), 0)
 
+  const fxDefined = usdToMxnRate() !== null
   const outstanding = invoices
     .filter((i) => i.status === "overdue" || i.status === "due")
     .reduce((sum, i) => sum + (i.amountBase ?? 0), 0)
@@ -686,6 +725,15 @@ export async function getPortfolioSummary() {
     activeCount: active.length,
     outstanding,
     overdueCount,
+    /** Para explicar de dónde sale cada cifra del tablero. */
+    stripeLinkCount: rows.reduce((sum, c) => sum + c.stripeCount, 0),
+    orphanedCount: rows.filter((c) => c.orphaned).length,
+    unconvertedClients: rows.filter((c) => c.unconvertedSubs > 0).length,
+    voidedInvoices: invoices.filter(
+      (i) => i.status === "void" || i.status === "uncollectible",
+    ).length,
+    fxDefined,
+    stripeConnected: stripeEnabled(),
     inFlightCount: inFlight.length,
     blockedCount: blocked.length,
     unlinked,

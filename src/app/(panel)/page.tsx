@@ -113,6 +113,18 @@ export default async function TableroPage() {
           outstanding={summary.outstanding}
           overdueCount={summary.overdueCount}
           unlinked={summary.unlinked.length}
+          unlinkedNoStripe={
+            summary.unlinked.filter((c) => c.stripeCount === 0).length
+          }
+          unlinkedNoLocation={
+            summary.unlinked.filter((c) => !c.ghlLocationId).length
+          }
+          stripeLinkCount={summary.stripeLinkCount}
+          orphanedCount={summary.orphanedCount}
+          unconvertedClients={summary.unconvertedClients}
+          voidedInvoices={summary.voidedInvoices}
+          fxDefined={summary.fxDefined}
+          stripeConnected={summary.stripeConnected}
         />
 
         <div className="grid gap-4 lg:grid-cols-2">

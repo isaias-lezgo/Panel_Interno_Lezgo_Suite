@@ -57,8 +57,10 @@ export type StripeLink = {
 export type ClientRow = Client & {
   locationName: string | null
   stripeCount: number
-  /** Centavos en la moneda base; `null` si nada se pudo convertir. */
+  /** Centavos en la moneda base; `null` si no hay nada que sumar. */
   mrr: number | null
+  /** Suscripciones activas que no se pudieron convertir a la moneda base. */
+  unconvertedSubs: number
 }
 
 export type StripeCustomerOption = {
@@ -133,8 +135,19 @@ export type ImplementationRow = {
   blockedReason?: string | null
 }
 
+export type ChecklistItem = {
+  id: string
+  /** `null` en un punto principal; el id del padre en un sub-punto. */
+  parentId: string | null
+  label: string
+  done: boolean
+  position: number
+}
+
 export type Implementation = ImplementationRow & {
   contacts: ImplementationContact[]
+  /** Ordenado: cada punto principal seguido de sus sub-puntos. */
+  checklist: ChecklistItem[]
 }
 
 export type Currency = "mxn" | "usd"
