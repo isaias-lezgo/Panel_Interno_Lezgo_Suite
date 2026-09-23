@@ -324,11 +324,24 @@ devuelven un error explicado en la interfaz.
 | `COPILOT_MODEL` | Sobrescribe el modelo por defecto |
 | `STRIPE_SECRET_KEY` | Clave de Stripe. Sin ella, facturación sigue en Neon/demo |
 | `STRIPE_FX_USD_MXN` | Tipo de cambio USD→MXN para normalizar los KPI |
+| `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`src/proxy.ts`). Sin contraseña en local no pide login |
 
 ## Cuidados
 
-- **No tocar otros proyectos de Vercel o Neon.** Este repo no está enlazado a
-  Vercel a propósito. Al conectar Neon, usa una rama nueva y exclusiva.
+- **No tocar otros proyectos de Vercel o Neon.** Este repo está enlazado al
+  proyecto de Vercel `panel-interno-lezgo-suite` (equipo
+  `isaias-rios-projects`, plan Hobby) y **cada push a `main` publica a
+  producción** en `panel-interno-lezgo-suite.vercel.app`. Producción usa la
+  misma base de Neon que local. Al conectar Neon, usa una rama nueva y
+  exclusiva.
+- **El panel está detrás de un candado** (`src/proxy.ts`): HTTP Basic con
+  `PANEL_USER` y `PANEL_PASSWORD`. En producción, sin `PANEL_PASSWORD` no
+  entra nadie. La protección de Vercel del proyecto es la estándar, que **no**
+  cubre el dominio de producción: el candado es lo único que lo cierra. No lo
+  quites ni lo relajes sin reemplazo.
+- Las variables de producción viven en Vercel como sensibles. Si cambias una
+  en `.env.local` (p. ej. al regenerar `GHL_OAUTH_CLIENT_SECRET`), cámbiala
+  también en Vercel y vuelve a publicar.
 - **No ejecutar escrituras contra GoHighLevel** desde herramientas de
   desarrollo o MCP sin pedirlo explícitamente. Leer está bien; crear, editar,
   borrar y enviar mensajes no.
