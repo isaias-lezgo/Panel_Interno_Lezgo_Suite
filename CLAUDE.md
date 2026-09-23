@@ -85,7 +85,8 @@ src/
     stripe/             Cliente, mapeo de facturas, totales y series
     lezgo-ia/           Arma la vista previa con lo que GHL sí entrega
     ai/agent.ts         Definición del agente + aprobaciones
-    ai/tools.ts         Herramientas del copiloto
+    ai/tools.ts         Herramientas de GHL del copiloto
+    ai/panel-tools.ts   Lecturas del panel para el copiloto
     format.ts nav.ts types.ts utils.ts
   db/                   Esquema Drizzle, conexión, reintento y seed
   data/                 Datos de ejemplo (demo.ts, lezgo-ia.ts)
@@ -260,7 +261,15 @@ el identificador `proveedor/modelo`. Los créditos **gratis** del Gateway no
 sirven — devuelven "Free tier users do not have access to this model" incluso
 con tarjeta registrada; hay que comprar créditos.
 
-**Copiloto.** Las herramientas viven en `src/lib/ai/tools.ts` y nunca lanzan:
+**Copiloto.** Lee todo el panel con las herramientas de `src/lib/ai/panel-tools.ts`
+—clientes con su cuenta, enlaces a Stripe y a subcuentas, ficha completa
+(`getClient`), implementaciones, pendientes, facturas, series y la
+configuración de Lezgo IA—, siempre a través del repositorio y **solo
+lectura**: lo que el panel escribe a Neon lo escribe el equipo desde la
+interfaz. Las de GHL eligen token por subcuenta (`ghlFor`): el de Lezgo Suite,
+el de la app OAuth, o el de agencia como último recurso. Las instrucciones
+llevan el modelo de datos y, en cada llamada, la fecha de México y qué fuentes
+están conectadas. Las herramientas de GHL viven en `src/lib/ai/tools.ts` y nunca lanzan:
 envuelven el error de GHL en `{ ok: false, error }` para que el modelo pueda
 razonar sobre el fallo. Lo destructivo o lo que sale hacia un cliente
 (`deleteContact`, `deleteOpportunity`, `sendMessage`) está detrás de

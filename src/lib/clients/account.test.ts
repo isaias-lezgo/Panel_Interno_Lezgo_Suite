@@ -11,6 +11,7 @@ import {
 const linea = (extra: Partial<PlanLine> = {}): PlanLine => ({
   label: "Lezgo Growth MXN",
   amount: 352700,
+  currency: "mxn",
   interval: "month",
   intervalCount: 1,
   renewsAt: "2026-10-01",

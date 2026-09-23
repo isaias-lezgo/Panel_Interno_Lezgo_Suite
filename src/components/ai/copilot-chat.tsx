@@ -47,10 +47,10 @@ type ToolPart = {
 }
 
 const suggestions = [
-  "¿Qué cuentas están en riesgo y por qué?",
-  "Lista las implementaciones bloqueadas y quién las lleva",
-  "¿Cuánto tenemos vencido y de qué clientes?",
-  "Muéstrame los pipelines de la subcuenta de Northgate",
+  "¿Qué clientes no tienen Stripe o subcuenta enlazada?",
+  "Implementaciones que vencen esta semana y qué les falta",
+  "¿Cuánto tenemos vencido en Stripe y de qué clientes?",
+  "¿Qué subcuentas tienen Lezgo IA sin configurar?",
 ]
 
 export function CopilotChat() {

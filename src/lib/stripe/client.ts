@@ -244,6 +244,7 @@ export async function summarizeSubscriptions() {
       entry.lines.push({
         label: producto || price.nickname || s.description || "",
         amount: (price.unit_amount ?? 0) * (item.quantity ?? 1),
+        currency: price.currency as Currency,
         interval: rec.interval,
         intervalCount: rec.interval_count,
         renewsAt: item.current_period_end

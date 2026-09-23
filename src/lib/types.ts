@@ -1,5 +1,7 @@
 /** Domain model for the Lezgo Suite control panel. */
 
+import type { PlanLine } from "@/lib/clients/account"
+
 /**
  * `excluded` es un enlace que alguien quitó a mano: la fila se queda para
  * que la siguiente sincronización no vuelva a proponerlo sola.
@@ -131,6 +133,8 @@ export type ClientDetail = {
     email: string | null
     active: boolean
     mrr: number | null
+    /** Sus líneas de suscripción activas, tal como las cobra Stripe. */
+    plan: PlanLine[]
   })[]
   locations: (LocationLink & { name: string; email: string | null })[]
   mrr: number | null

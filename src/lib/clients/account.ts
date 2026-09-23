@@ -1,6 +1,7 @@
 import type {
   BillingPeriod,
   Client,
+  Currency,
   ClientAccount,
   Derived,
   Membership,
@@ -20,6 +21,7 @@ export type PlanLine = {
   label: string
   /** Importe del precio en centavos, sin normalizar a mes. */
   amount: number
+  currency: Currency
   /** `month`, `year`… tal cual lo nombra Stripe. */
   interval: string
   intervalCount: number

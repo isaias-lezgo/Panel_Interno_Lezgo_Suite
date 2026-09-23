@@ -298,7 +298,7 @@ const cachedStripeCustomers = unstable_cache(
       plan: subs.get(c.id)?.lines ?? [],
     }))
   },
-  ["stripe-customers"],
+  ["stripe-customers-v2"],
   { revalidate: 3600, tags: ["stripe"] },
 )
 
@@ -527,6 +527,7 @@ export async function getClientDetail(
       email: c?.email ?? null,
       active: (c?.subscriptions.length ?? 0) > 0,
       mrr: c ? mrrOf(c.subscriptions, base, fx).total : null,
+      plan: c?.plan ?? [],
     }
   })
   return {
