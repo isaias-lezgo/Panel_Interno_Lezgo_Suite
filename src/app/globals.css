@@ -2,16 +2,20 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+/* Base UI expone la orientación como data-orientation; shadcn la lee así. */
+@custom-variant data-horizontal (&[data-orientation="horizontal"]);
+@custom-variant data-vertical (&[data-orientation="vertical"]);
 
 /* ============================================================
    Lezgo Suite — "Pit Wall" design tokens
-   A telemetry console for an agency running many client accounts
-   at speed. Ink + porcelain ground, one signal orange, one flux
-   teal. Numbers are always mono and tabular.
+   A calm console for an agency running many client accounts.
+   Ink + porcelain ground, one signal orange, one flux teal. One
+   friendly sans for everything; numbers are tabular so columns
+   never jitter; mono is reserved for code and identifiers.
    ============================================================ */
 
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
 
   /* surfaces */
   --background: #eef1f0;
@@ -36,8 +40,8 @@
   --accent-foreground: #0f1418;
   --destructive: #c2385e;
   --destructive-foreground: #ffffff;
-  --border: #d6dbda;
-  --input: #d6dbda;
+  --border: #e0e5e4;
+  --input: #d3d9d8;
   --ring: #e8541b;
 
   /* status — always paired with a label or icon, never colour alone */
@@ -57,9 +61,10 @@
   --chart-5: #c2385e;
 
   /* instrument details */
-  --grid-line: #dfe4e3;
   --rail: #f6f8f7;
   --rail-foreground: #0f1418;
+  /* Fondo del logo: oscuro en ambos temas, el naranja se pierde sobre claro. */
+  --brand-plate: #0d1215;
 }
 
 .dark {
@@ -83,8 +88,8 @@
   --accent-foreground: #e6ecee;
   --destructive: #e0668a;
   --destructive-foreground: #1b0810;
-  --border: #212a30;
-  --input: #212a30;
+  --border: #1c242a;
+  --input: #2a343b;
   --ring: #ff6a33;
 
   --status-live: #17b5b0;
@@ -101,7 +106,6 @@
   --chart-4: #b58712;
   --chart-5: #d9557c;
 
-  --grid-line: #1b2429;
   --rail: #0d1215;
   --rail-foreground: #e6ecee;
 }
@@ -131,7 +135,7 @@
   --color-flux-foreground: var(--flux-foreground);
   --color-rail: var(--rail);
   --color-rail-foreground: var(--rail-foreground);
-  --color-grid-line: var(--grid-line);
+  --color-brand-plate: var(--brand-plate);
 
   --color-status-live: var(--status-live);
   --color-status-build: var(--status-build);
@@ -152,7 +156,6 @@
   --radius-xl: calc(var(--radius) * 1.5);
 
   --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-data), ui-monospace, "SFMono-Regular", monospace;
 }
 
@@ -169,18 +172,24 @@
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
-    font-feature-settings: "cv05" 1, "ss01" 1;
     -webkit-font-smoothing: antialiased;
   }
 
   /* Every number in this product is tabular. Columns of figures that
-     jitter between renders are unreadable at a glance. */
+     jitter between renders are unreadable at a glance. Same family as
+     the text so figures read as part of the sentence, not as output. */
   .num,
   th[data-num],
   td[data-num] {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Code, env vars and identifiers keep the mono face, even inside .num. */
+  code,
+  kbd,
+  .mono {
     font-family: var(--font-data), ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    font-size: 0.92em;
   }
 
   :focus-visible {
@@ -194,31 +203,24 @@
 }
 
 @layer components {
-  /* Micro-caps label. Used for every instrument label in the panel so
-     data and its name never compete for the same visual weight. */
+  /* Instrument label. Small, medium weight, sentence case: it names the
+     reading without competing with it. */
   .eyebrow {
-    font-family: var(--font-data), ui-monospace, monospace;
-    font-size: 0.6875rem;
-    line-height: 1;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    font-weight: 500;
     color: var(--muted-foreground);
   }
 
   .display {
-    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.015em;
     font-weight: 600;
   }
 
-  /* Blueprint ground: a 32px hairline grid that only reads as texture,
-     never as content. Sits behind the shell, not inside cards. */
+  /* Page ground. Kept as a hook for the panel views; intentionally flat
+     so the content is the only texture on screen. */
   .blueprint {
-    background-image:
-      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
-    background-size: 32px 32px;
-    background-position: -1px -1px;
+    background-color: var(--background);
   }
 
   .hairline-t {

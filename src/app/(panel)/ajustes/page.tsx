@@ -6,6 +6,7 @@ import { ThemeToggle } from "@/components/shell/theme-toggle"
 import { COPILOT_MODEL, usingDirectAnthropic } from "@/lib/ai/agent"
 import { hasDatabase } from "@/db"
 import { ghl } from "@/lib/ghl/client"
+import { oauthConfigured, oauthStatus } from "@/lib/ghl/oauth"
 import { cn } from "@/lib/utils"
 
 export const metadata = { title: "Ajustes" }
@@ -16,8 +17,26 @@ const approvalTools = new Set([
   "sendMessage",
 ])
 
-export default async function AjustesPage() {
+export default async function AjustesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ oauth?: string; detalle?: string }>
+}) {
+  const [{ oauth, detalle }, status] = await Promise.all([
+    searchParams,
+    oauthStatus().catch(() => ({ connected: false as const })),
+  ])
   const connections = [
+    {
+      name: "GoHighLevel · app OAuth",
+      variable: "GHL_OAUTH_CLIENT_ID",
+      ready: status.connected,
+      detail: !oauthConfigured()
+        ? "Faltan GHL_OAUTH_CLIENT_ID y GHL_OAUTH_CLIENT_SECRET."
+        : status.connected
+          ? "Instalada en la agencia. Lee pipelines, oportunidades y conversaciones de cada subcuenta."
+          : "Configurada pero sin instalar: abre el install link de la app e instálala en la agencia.",
+    },
     {
       name: "GoHighLevel",
       variable: "GHL_API_KEY",
@@ -65,6 +84,22 @@ export default async function AjustesPage() {
         title="Ajustes"
         description="Conexiones, origen de datos y permisos del copiloto. Las variables se definen en .env.local y se leen en el servidor."
       />
+
+      {oauth && (
+        <p
+          role="status"
+          className={cn(
+            "mx-4 mb-4 rounded-lg border px-4 py-3 text-sm md:mx-6",
+            oauth === "ok"
+              ? "border-status-live/40 text-foreground"
+              : "border-status-risk/40 text-status-risk",
+          )}
+        >
+          {oauth === "ok"
+            ? "App OAuth instalada: el panel ya puede leer las subcuentas."
+            : `No se pudo instalar la app OAuth: ${detalle ?? "error desconocido"}`}
+        </p>
+      )}
 
       <div className="grid gap-4 px-4 pb-12 md:px-6 lg:grid-cols-2">
         <Instrument label="Conexiones" hint="Estado de las variables de entorno">

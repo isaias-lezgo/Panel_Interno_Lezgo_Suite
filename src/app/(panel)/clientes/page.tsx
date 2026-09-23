@@ -20,7 +20,7 @@ export default async function ClientesPage() {
   const active = rows.filter((r) => !r.orphaned)
   const mrr = active.reduce((s, r) => s + (r.mrr ?? 0), 0)
   const unlinked = active.filter(
-    (r) => r.stripeCount === 0 || !r.ghlLocationId,
+    (r) => r.stripeCount === 0 || r.locationNames.length === 0,
   ).length
 
   const hint = [

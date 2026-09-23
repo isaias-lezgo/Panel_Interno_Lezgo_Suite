@@ -21,10 +21,7 @@ export default async function PanelLayout({
     <div className="flex min-h-dvh bg-background">
       <AppRail ghlConnected={ghl.isConfigured} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar
-          clients={clients}
-          operator={{ name: "Isaias Rios", role: "Fundador" }}
-        />
+        <TopBar clients={clients} />
         <MobileNav />
         <main className="flex-1">{children}</main>
       </div>

@@ -31,7 +31,9 @@ export type GhlContact = {
   locationId?: string
   firstName?: string
   lastName?: string
+  /** GHL lo devuelve en minúsculas; para mostrar usa `firstName`/`lastName`. */
   contactName?: string
+  companyName?: string | null
   email?: string
   phone?: string
   tags?: string[]
@@ -86,6 +88,7 @@ export type GhlOpportunity = {
 
 export type GhlLocation = {
   id: string
+  companyId?: string
   name: string
   address?: string
   city?: string
@@ -93,6 +96,23 @@ export type GhlLocation = {
   timezone?: string
   email?: string
   phone?: string
+}
+
+/** Usuario de GHL. `roles.type` es "account" para los de subcuenta. */
+export type GhlUser = {
+  id: string
+  name: string
+  firstName?: string
+  lastName?: string
+  email?: string
+  phone?: string
+  deleted?: boolean
+  dateAdded?: string
+  roles?: {
+    type?: "account" | "agency"
+    role?: "admin" | "user"
+    locationIds?: string[]
+  }
 }
 
 export type GhlPipeline = {
@@ -183,6 +203,8 @@ export class GhlClient {
   searchContacts(params: {
     locationId?: string
     pageLimit?: number
+    /** Texto libre: nombre, correo, teléfono o empresa. */
+    query?: string
     filters?: ContactFilter[]
     sort?: { field: string; direction: "asc" | "desc" }[]
     searchAfter?: unknown[]
@@ -196,6 +218,7 @@ export class GhlClient {
       body: {
         locationId: this.locationOrThrow(params.locationId),
         pageLimit: params.pageLimit ?? 20,
+        query: params.query,
         filters: params.filters,
         sort: params.sort ?? [{ field: "dateAdded", direction: "desc" }],
         searchAfter: params.searchAfter,
@@ -343,6 +366,24 @@ export class GhlClient {
     return this.request<{ customFields: { id: string; name: string }[] }>(
       `/locations/${this.locationOrThrow(locationId)}/customFields`,
     )
+  }
+
+  /* ------------------------------------------------------------------- users */
+
+  /**
+   * Usuarios de una subcuenta. Con token de agencia `GET /users/?locationId=`
+   * responde "Token's user type mismatch!"; hay que usar `/users/search` con
+   * `companyId`. Trae también a los de agencia que tienen acceso a la
+   * subcuenta, con `roles.type` = "account" igual que los del cliente.
+   */
+  searchUsers(params: { companyId: string; locationId: string; limit?: number }) {
+    return this.request<{ users: GhlUser[]; count: number }>("/users/search", {
+      query: {
+        companyId: params.companyId,
+        locationId: params.locationId,
+        limit: params.limit ?? 100,
+      },
+    })
   }
 
   /* ----------------------------------------------------- conversations & ops */

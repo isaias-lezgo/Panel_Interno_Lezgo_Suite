@@ -4,6 +4,8 @@ import type {
   ClientOpportunity,
   ImplementationRow,
   InvoiceRow,
+  LocationLink,
+  Pending,
   StripeLink,
 } from "@/lib/types"
 
@@ -32,24 +34,26 @@ const demoClient = (
   email,
   phone: null,
   ghlContactId: id,
-  ghlLocationId: null,
-  ghlLocationLinkedBy: null,
   stage,
   wonAt,
   syncedAt: synced,
   orphaned: false,
   notes: null,
+  supportActive: null,
+  licenseDueAt: null,
+  billingPeriod: null,
+  membership: null,
   ...extra,
 })
 
 export const clients: Client[] = [
-  demoClient("cl_northgate", "northgate-dental", "Northgate Dental Group", "Ana Torres", "ana@northgate.example", "Cliente Activo", "2024-11-04", { ghlLocationId: "loc_9Xk2Qm4Tb", ghlLocationLinkedBy: "auto", notes: "Seis sucursales sobre un mismo snapshot." }),
-  demoClient("cl_veloz", "veloz-auto", "Veloz Auto Group", "Marco Vela", "marco@veloz.example", "Cliente Activo", "2025-02-10", { ghlLocationId: "loc_Vz8Lp3Rq", ghlLocationLinkedBy: "manual" }),
-  demoClient("cl_lumen", "lumen-aesthetics", "Lumen Aesthetics", "Sofía Luna", "sofia@lumen.example", "Proceso de Implementación", "2026-07-15"),
-  demoClient("cl_cascade", "cascade-roofing", "Cascade Roofing Co.", "Tom Reyes", "tom@cascade.example", "Cliente Activo", "2025-06-01", { ghlLocationId: "loc_Cs4Rf7Wn", ghlLocationLinkedBy: "auto" }),
+  demoClient("cl_northgate", "northgate-dental", "Northgate Dental Group", "Ana Torres", "ana@northgate.example", "Cliente Activo", "2024-11-04", { notes: "Seis sucursales sobre un mismo snapshot.", membership: "pro", billingPeriod: "1y", licenseDueAt: "2026-11-04" }),
+  demoClient("cl_veloz", "veloz-auto", "Veloz Auto Group", "Marco Vela", "marco@veloz.example", "Cliente Activo", "2025-02-10", { membership: "growth", billingPeriod: "1m", licenseDueAt: "2026-10-10" }),
+  demoClient("cl_lumen", "lumen-aesthetics", "Lumen Aesthetics", "Sofía Luna", "sofia@lumen.example", "Proceso de Implementación", "2026-07-15", { membership: "start", billingPeriod: "1m" }),
+  demoClient("cl_cascade", "cascade-roofing", "Cascade Roofing Co.", "Tom Reyes", "tom@cascade.example", "Cliente Activo", "2025-06-01"),
   demoClient("cl_pinebrook", "pinebrook-legal", "Pinebrook Legal", "Laura Pine", "laura@pinebrook.example", "Cliente Activo", "2025-09-12"),
   demoClient("cl_atlas", "atlas-fitness", "Atlas Fitness Collective", "Diego Atlas", "diego@atlas.example", "Proceso de Implementación", "2026-08-01"),
-  demoClient("cl_meridian", "meridian-wealth", "Meridian Wealth Partners", "Elena Mar", "elena@meridian.example", "Activo con Servicio Técnico Dedicado", "2025-01-20", { ghlLocationId: "loc_Md2Wl9Pk", ghlLocationLinkedBy: "auto" }),
+  demoClient("cl_meridian", "meridian-wealth", "Meridian Wealth Partners", "Elena Mar", "elena@meridian.example", "Activo con Servicio Técnico Dedicado", "2025-01-20", { membership: "elite", billingPeriod: "6m", licenseDueAt: "2026-09-30" }),
   demoClient("cl_harborview", "harborview-realty", "Harborview Realty", "Pablo Haro", "pablo@harborview.example", "Cliente Activo", "2025-11-03"),
   demoClient("cl_brightpath", "brightpath-tutoring", "Brightpath Tutoring", "Rita Bright", "rita@brightpath.example", "Proceso de Implementación", "2026-08-05"),
   demoClient("cl_solstice", "solstice-home-care", "Solstice Home Care", "Iván Sol", "ivan@solstice.example", "Cliente Activo", "2025-04-18"),
@@ -71,6 +75,14 @@ export const clientOpportunities: ClientOpportunity[] = clients.map((c) => ({
 export const stripeLinks: StripeLink[] = [
   { stripeCustomerId: "cus_demo_northgate", clientId: "cl_northgate", linkedBy: "auto", linkedAt: synced },
   { stripeCustomerId: "cus_demo_veloz", clientId: "cl_veloz", linkedBy: "manual", linkedAt: synced },
+]
+
+export const locationLinks: LocationLink[] = [
+  { ghlLocationId: "loc_9Xk2Qm4Tb", clientId: "cl_northgate", linkedBy: "auto", linkedAt: synced },
+  { ghlLocationId: "loc_Nd4Hs8Pq", clientId: "cl_northgate", linkedBy: "manual", linkedAt: synced },
+  { ghlLocationId: "loc_Vz8Lp3Rq", clientId: "cl_veloz", linkedBy: "manual", linkedAt: synced },
+  { ghlLocationId: "loc_Cs4Rf7Wn", clientId: "cl_cascade", linkedBy: "auto", linkedAt: synced },
+  { ghlLocationId: "loc_Md2Wl9Pk", clientId: "cl_meridian", linkedBy: "auto", linkedAt: synced },
 ]
 
 export const implementations: ImplementationRow[] = [
@@ -245,6 +257,38 @@ export const implementations: ImplementationRow[] = [
     blocked: true,
     blockedReason: "Sin respuesta a tres solicitudes de alcance.",
   },
+]
+
+const pending = (
+  id: string,
+  body: string,
+  location: [string, string] | null,
+  createdAt: string,
+  doneAt: string | null = null,
+): Pending => ({
+  id,
+  body,
+  ghlLocationId: location?.[0] ?? null,
+  ghlLocationName: location?.[1] ?? null,
+  done: doneAt !== null,
+  doneAt,
+  createdAt,
+})
+
+const northgate: [string, string] = ["loc_9Xk2Qm4Tb", "Northgate Dental Group"]
+const veloz: [string, string] = ["loc_Vz8Lp3Rq", "Veloz Auto Group"]
+const cascade: [string, string] = ["loc_Cs4Rf7Wn", "Cascade Roofing Co."]
+
+export const pendings: Pending[] = [
+  pending("pd_001", "Mandar el snapshot de citas a revisión", northgate, "2026-09-18T15:20:00.000Z"),
+  pending("pd_002", "Revisar por qué el número de WhatsApp no manda", northgate, "2026-09-21T11:05:00.000Z"),
+  pending("pd_003", "Capacitar a recepción en el calendario", northgate, "2026-09-22T09:40:00.000Z"),
+  pending("pd_004", "Pedir el logo en vectores", northgate, "2026-09-17T18:00:00.000Z", "2026-09-21T16:30:00.000Z"),
+  pending("pd_005", "Conectar Stripe a la subcuenta", veloz, "2026-09-19T10:15:00.000Z"),
+  pending("pd_006", "Cerrar el formulario viejo de la landing", veloz, "2026-09-20T13:45:00.000Z", "2026-09-22T08:10:00.000Z"),
+  pending("pd_007", "Migrar los contactos del CSV de Jobber", cascade, "2026-09-16T17:30:00.000Z"),
+  pending("pd_008", "Cotizar el plan Growth para el prospecto de Mérida", null, "2026-09-21T19:00:00.000Z"),
+  pending("pd_009", "Llamar a soporte de GHL por el límite de envíos", null, "2026-09-22T08:25:00.000Z"),
 ]
 
 export const invoices: InvoiceRow[] = [

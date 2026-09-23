@@ -1,12 +1,27 @@
 import "server-only"
 
 import { unstable_cache, updateTag } from "next/cache"
-import { desc, eq, max, ne } from "drizzle-orm"
+import { desc, eq, inArray, max, ne } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
-import { ghl, type GhlContact } from "@/lib/ghl/client"
-import { lezgoSuite, lezgoSuiteEnabled } from "@/lib/ghl/lezgo-suite"
+import * as lezgoIaDemo from "@/data/lezgo-ia"
+import { actions as lezgoIaDemoActions } from "@/data/lezgo-ia-ops"
+import { GhlClient, ghl, type GhlContact, type GhlUser } from "@/lib/ghl/client"
+import { locationToken, oauthConfigured } from "@/lib/ghl/oauth"
+import {
+  LEZGO_SUITE_LOCATION_ID,
+  lezgoSuite,
+  lezgoSuiteEnabled,
+} from "@/lib/ghl/lezgo-suite"
+import {
+  applyConfig,
+  defaultAccountConfig,
+  type AccountConfig,
+  type StoredStageRules,
+} from "@/lib/lezgo-ia/config"
+import { advisorUsers, toSubaccount } from "@/lib/lezgo-ia/from-ghl"
+import type { IaStatus, SettingValues, Voice } from "@/data/lezgo-ia"
 import {
   listAllSubscriptions,
   listCustomers,
@@ -22,6 +37,7 @@ import {
   type MovementPoint,
   type SubscriptionSpan,
 } from "@/lib/stripe/series"
+import { resolveAccount } from "@/lib/clients/account"
 import { mapInvoice, toMxn } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
@@ -33,10 +49,13 @@ import type {
   Currency,
   Implementation,
   ImplementationContact,
+  ImplementationNote,
   ImplementationRow,
   Invoice,
   InvoiceRow,
+  LocationLink,
   LocationOption,
+  Pending,
   StripeCustomerOption,
   StripeLink,
 } from "@/lib/types"
@@ -80,6 +99,15 @@ export async function listStripeLinks(): Promise<StripeLink[]> {
     .where(ne(schema.clientStripeCustomers.linkedBy, "excluded"))) as StripeLink[]
 }
 
+/** Igual que con Stripe: solo los vivos, los quitados quedan archivados. */
+export async function listLocationLinks(): Promise<LocationLink[]> {
+  if (!db) return demo.locationLinks
+  return (await db
+    .select()
+    .from(schema.clientGhlLocations)
+    .where(ne(schema.clientGhlLocations.linkedBy, "excluded"))) as LocationLink[]
+}
+
 export async function lastSyncAt(): Promise<string | null> {
   if (!db) return demo.clients[0]?.syncedAt ?? null
   const [row] = await db
@@ -94,9 +122,10 @@ export async function listImplementations(): Promise<Implementation[]> {
       ...i,
       contacts: [],
       checklist: [],
+      notes: [],
     }))
   }
-  const [rows, contacts, items] = await Promise.all([
+  const [rows, contacts, items, notes] = await Promise.all([
     db
       .select()
       .from(schema.implementations)
@@ -106,6 +135,10 @@ export async function listImplementations(): Promise<Implementation[]> {
       .select()
       .from(schema.implementationChecklistItems)
       .orderBy(schema.implementationChecklistItems.position),
+    db
+      .select()
+      .from(schema.implementationNotes)
+      .orderBy(desc(schema.implementationNotes.createdAt)),
   ])
   const contactsOf = new Map<string, ImplementationContact[]>()
   for (const c of contacts) {
@@ -117,10 +150,15 @@ export async function listImplementations(): Promise<Implementation[]> {
   for (const { implementationId, ...item } of items) {
     itemsOf.set(implementationId, [...(itemsOf.get(implementationId) ?? []), item])
   }
+  const notesOf = new Map<string, ImplementationNote[]>()
+  for (const { implementationId, ...note } of notes) {
+    notesOf.set(implementationId, [...(notesOf.get(implementationId) ?? []), note])
+  }
   return rows.map((r) => ({
     ...(r as ImplementationRow),
     contacts: contactsOf.get(r.id) ?? [],
     checklist: orderChecklist(itemsOf.get(r.id) ?? []),
+    notes: notesOf.get(r.id) ?? [],
   }))
 }
 
@@ -133,6 +171,17 @@ function orderChecklist(items: ChecklistItem[]) {
   return items
     .filter((i) => !i.parentId)
     .flatMap((i) => [i, ...(children.get(i.id) ?? [])])
+}
+
+/* ------------------------------------------------------- pendientes */
+
+/**
+ * Los pendientes en crudo. Agruparlos es cosa de `groupPendings`, que corre
+ * en el navegador para que marcar y agregar reordenen la lista al instante.
+ */
+export async function listPendings(): Promise<Pending[]> {
+  if (!db) return demo.pendings
+  return (await db.select().from(schema.pendings)) as Pending[]
 }
 
 /* ------------------------------------------- contactos de Lezgo Suite */
@@ -244,7 +293,9 @@ const cachedStripeCustomers = unstable_cache(
       name: c.name?.trim() || c.email || c.id,
       email: c.email ?? null,
       phone: c.phone ?? null,
-      subscriptions: subs.get(c.id) ?? [],
+      subscriptions: subs.get(c.id)?.amounts ?? [],
+      /** Sus líneas activas: de ahí salen membresía, periodicidad y vencimiento. */
+      plan: subs.get(c.id)?.lines ?? [],
     }))
   },
   ["stripe-customers"],
@@ -376,30 +427,27 @@ export async function listLocationOptions(): Promise<{
 }
 
 /**
- * Subcuentas que nadie tiene, más la del propio cliente. El desplegable no
- * ofrece lo que ya es de otro: el error "esa subcuenta ya es de X" solo
+ * Subcuentas que nadie tiene. El desplegable no ofrece lo que ya es de otro
+ * ni lo que el cliente ya tiene: el error "esa subcuenta ya es de X" solo
  * debería aparecer en una carrera entre dos pestañas.
  */
-export async function listFreeLocationOptions(clientId?: string) {
-  const [{ options, error }, clients] = await Promise.all([
+export async function listFreeLocationOptions() {
+  const [{ options, error }, links] = await Promise.all([
     listLocationOptions(),
-    listClients(),
+    listLocationLinks(),
   ])
-  const tomadas = new Set(
-    clients
-      .filter((c) => c.ghlLocationId && c.id !== clientId)
-      .map((c) => c.ghlLocationId as string),
-  )
+  const tomadas = new Set(links.map((l) => l.ghlLocationId))
   return { options: options.filter((l) => !tomadas.has(l.id)), error }
 }
 
 /* ----------------------------------------------------------------- vistas */
 
 export async function listClientRows(): Promise<ClientRow[]> {
-  const [clients, links, { list: stripe }, { options: locations }] =
+  const [clients, links, locationLinks, { list: stripe }, { options: locations }] =
     await Promise.all([
       listClients(),
       listStripeLinks(),
+      listLocationLinks(),
       stripeCustomersOrNull(),
       listLocationOptions(),
     ])
@@ -411,6 +459,14 @@ export async function listClientRows(): Promise<ClientRow[]> {
   for (const l of links) {
     linksByClient.set(l.clientId, [...(linksByClient.get(l.clientId) ?? []), l])
   }
+  const locationsByClient = new Map<string, string[]>()
+  for (const l of locationLinks) {
+    const name = locationById.get(l.ghlLocationId) ?? l.ghlLocationId
+    locationsByClient.set(l.clientId, [
+      ...(locationsByClient.get(l.clientId) ?? []),
+      name,
+    ])
+  }
 
   return clients.map((c) => {
     const mine = linksByClient.get(c.id) ?? []
@@ -418,14 +474,18 @@ export async function listClientRows(): Promise<ClientRow[]> {
       (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
     )
     const { total, unconverted } = mrrOf(subs, base, fx)
+    const lines = mine.flatMap(
+      (l) => stripeById.get(l.stripeCustomerId)?.plan ?? [],
+    )
     return {
       ...c,
-      locationName: c.ghlLocationId
-        ? (locationById.get(c.ghlLocationId) ?? c.ghlLocationId)
-        : null,
+      locationNames: (locationsByClient.get(c.id) ?? []).sort((a, b) =>
+        a.localeCompare(b, "es"),
+      ),
       stripeCount: mine.length,
       mrr: total,
       unconvertedSubs: unconverted,
+      account: resolveAccount(c, lines),
     }
   })
 }
@@ -436,7 +496,7 @@ export async function getClientDetail(
   const client = await getClient(slug)
   if (!client) return undefined
 
-  const [opportunities, links, { list: stripe }, { options: locations }] =
+  const [opportunities, links, locationLinks, { list: stripe }, { options: locations }] =
     await Promise.all([
       db
         ? (db
@@ -450,12 +510,14 @@ export async function getClientDetail(
             demo.clientOpportunities.filter((o) => o.clientId === client.id),
           ),
       listStripeLinks(),
+      listLocationLinks(),
       stripeCustomersOrNull(),
       listLocationOptions(),
     ])
   const base = baseCurrency()
   const fx = usdToMxnRate()
   const stripeById = new Map(stripe.map((c) => [c.id, c]))
+  const locationById = new Map(locations.map((l) => [l.id, l]))
   const mine = links.filter((l) => l.clientId === client.id)
   const stripeRows = mine.map((l) => {
     const c = stripeById.get(l.stripeCustomerId)
@@ -471,13 +533,17 @@ export async function getClientDetail(
     client,
     opportunities,
     stripe: stripeRows,
-    location: client.ghlLocationId
-      ? (locations.find((l) => l.id === client.ghlLocationId) ?? {
-          id: client.ghlLocationId,
-          name: client.ghlLocationId,
-          email: null,
-        })
-      : null,
+    locations: locationLinks
+      .filter((l) => l.clientId === client.id)
+      .map((l) => {
+        const loc = locationById.get(l.ghlLocationId)
+        return {
+          ...l,
+          name: loc?.name ?? l.ghlLocationId,
+          email: loc?.email ?? null,
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "es")),
     mrr: mrrOf(
       mine.flatMap(
         (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
@@ -716,7 +782,9 @@ export async function getPortfolioSummary() {
 
   const inFlight = implementations.filter((i) => i.stage !== "live")
   const blocked = implementations.filter((i) => i.blocked)
-  const unlinked = active.filter((c) => c.stripeCount === 0 || !c.ghlLocationId)
+  const unlinked = active.filter(
+    (c) => c.stripeCount === 0 || c.locationNames.length === 0,
+  )
 
   return {
     baseCurrency: baseCurrency(),
@@ -742,4 +810,209 @@ export async function getPortfolioSummary() {
     blockedCount: blocked.length,
     unlinked,
   }
+}
+
+/* -------------------------------------------------------------- Lezgo IA */
+
+/**
+ * Un usuario con acceso a la subcuenta Lezgo Suite, o con correo nuestro, es
+ * del equipo de la agencia: GHL lo lista como "account" en cada subcuenta
+ * que atiende, pero no es asesor del cliente.
+ */
+function isLezgoStaff(user: GhlUser) {
+  return (
+    (user.roles?.locationIds ?? []).includes(LEZGO_SUITE_LOCATION_ID) ||
+    /lezgosuite/i.test(user.email ?? "")
+  )
+}
+
+const cachedLezgoIaAccounts = unstable_cache(
+  async (links: { locationId: string; clientName: string }[]) => {
+    const all = await ghl.listAllLocations()
+    const byId = new Map(all.map((l) => [l.id, l]))
+    let failed = 0
+    const subaccounts = await Promise.all(
+      links.map(async ({ locationId, clientName }) => {
+        const location = byId.get(locationId)
+        if (!location?.companyId) {
+          failed++
+          return null
+        }
+        try {
+          const { users } = await ghl.searchUsers({
+            companyId: location.companyId,
+            locationId,
+          })
+          const live = await readLocationPipeline(
+            locationId,
+            advisorUsers(users, isLezgoStaff).map((u) => u.id),
+          )
+          return toSubaccount({
+            location,
+            users,
+            clientName,
+            isStaff: isLezgoStaff,
+            ...live,
+          })
+        } catch (error) {
+          console.error(`GHL no devolvió usuarios de ${locationId}`, error)
+          failed++
+          return null
+        }
+      }),
+    )
+    return {
+      subaccounts: subaccounts
+        .filter((s) => s !== null)
+        .sort((a, b) => a.name.localeCompare(b.name, "es")),
+      failed,
+    }
+  },
+  ["lezgo-ia-accounts-v3"],
+  { revalidate: 3600, tags: ["ghl-locations", "lezgo-ia"] },
+)
+
+/**
+ * Lo que solo la app OAuth puede leer de una subcuenta: sus pipelines y
+ * cuántas oportunidades abiertas tiene cada asesor (`meta.total` con
+ * `limit=1`, una llamada por asesor). Si la app no está o no llega a la
+ * subcuenta, `null`: la vista lo declara en vez de mostrar ceros.
+ */
+async function readLocationPipeline(locationId: string, advisorIds: string[]) {
+  if (!oauthConfigured()) return { pipelines: null, openLeads: null }
+  try {
+    const client = new GhlClient(await locationToken(locationId), locationId)
+    const [{ pipelines }, counts] = await Promise.all([
+      client.listPipelines(locationId),
+      Promise.all(
+        advisorIds.map(async (id) => {
+          const r = await client.request<{ meta?: { total?: number } }>(
+            "/opportunities/search",
+            {
+              query: {
+                location_id: locationId,
+                assigned_to: id,
+                status: "open",
+                limit: 1,
+              },
+            },
+          )
+          return [id, r.meta?.total ?? 0] as const
+        }),
+      ),
+    ])
+    return { pipelines, openLeads: Object.fromEntries(counts) }
+  } catch (error) {
+    console.error(`La app OAuth no leyó ${locationId}`, error)
+    return { pipelines: null, openLeads: null }
+  }
+}
+
+/**
+ * Subcuentas de Lezgo IA: las de GHL enlazadas a un cliente, con sus
+ * usuarios reales como asesores. La IA aún no corre, así que no hay hilos
+ * ni bitácora que leer: llegan vacíos, no inventados. Sin GHL o sin Neon, el
+ * demo completo.
+ */
+export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
+  const demoData: lezgoIaDemo.LezgoIaData = {
+    source: "demo",
+    now: lezgoIaDemo.DEMO_NOW,
+    subaccounts: lezgoIaDemo.subaccounts,
+    threads: lezgoIaDemo.threads,
+    actions: lezgoIaDemoActions,
+    failed: 0,
+  }
+  if (!ghl.isConfigured || !db) return demoData
+
+  const [links, clients] = await Promise.all([
+    listLocationLinks(),
+    db
+      .select({ id: schema.clients.id, name: schema.clients.name })
+      .from(schema.clients),
+  ])
+  const clientById = new Map(clients.map((c) => [c.id, c.name]))
+  const input = links
+    .map((l) => ({
+      locationId: l.ghlLocationId,
+      clientName: clientById.get(l.clientId) ?? "",
+    }))
+    .sort((a, b) => a.locationId.localeCompare(b.locationId))
+
+  try {
+    const { subaccounts, failed } = await cachedLezgoIaAccounts(input)
+    // La configuración no pasa por la caché de GHL: lo guardado se ve al instante.
+    const configs = await getLezgoIaConfigs(
+      subaccounts.map((s) => ({ locationId: s.id, timezone: s.timezone })),
+    )
+    return {
+      source: "ghl",
+      now: new Date().toISOString(),
+      subaccounts: subaccounts.map((s) => applyConfig(s, configs.get(s.id))),
+      threads: [],
+      actions: [],
+      failed,
+    }
+  } catch (error) {
+    console.error("GHL no respondió para Lezgo IA", error)
+    return demoData
+  }
+}
+
+/**
+ * Configuración guardada de Lezgo IA, una por subcuenta. Solo trae las que
+ * tienen fila; a las demás les toca `defaultAccountConfig`. Es la lectura
+ * que usa el motor de la IA: con esto y `shouldNotify` decide sin modelo.
+ */
+export async function getLezgoIaConfigs(
+  locations: { locationId: string; timezone?: string }[],
+): Promise<Map<string, AccountConfig>> {
+  const result = new Map<string, AccountConfig>()
+  if (!db || locations.length === 0) return result
+  const ids = locations.map((l) => l.locationId)
+  const [accounts, advisors] = await Promise.all([
+    db
+      .select()
+      .from(schema.lezgoIaAccounts)
+      .where(inArray(schema.lezgoIaAccounts.ghlLocationId, ids)),
+    db
+      .select()
+      .from(schema.lezgoIaAdvisors)
+      .where(inArray(schema.lezgoIaAdvisors.ghlLocationId, ids)),
+  ])
+  const timezoneOf = new Map(locations.map((l) => [l.locationId, l.timezone]))
+  for (const row of accounts) {
+    result.set(row.ghlLocationId, {
+      ...defaultAccountConfig(row.ghlLocationId, timezoneOf.get(row.ghlLocationId)),
+      status: row.status as IaStatus,
+      settings: row.settings as SettingValues,
+      voice: (row.voice as Voice | null) ?? null,
+      stageRules: row.stageRules as StoredStageRules,
+    })
+  }
+  for (const row of advisors) {
+    const config =
+      result.get(row.ghlLocationId) ??
+      defaultAccountConfig(row.ghlLocationId, timezoneOf.get(row.ghlLocationId))
+    config.advisors[row.ghlUserId] = {
+      userId: row.ghlUserId,
+      alerts: row.alerts,
+      settings: row.settings as SettingValues,
+      away:
+        row.awayFrom && row.awayTo && row.awayCoverage
+          ? { from: row.awayFrom, to: row.awayTo, coverage: row.awayCoverage }
+          : null,
+    }
+    result.set(row.ghlLocationId, config)
+  }
+  return result
+}
+
+/** Una sola subcuenta; sin fila guardada, la configuración por defecto. */
+export async function getLezgoIaConfig(
+  locationId: string,
+  timezone?: string,
+): Promise<AccountConfig> {
+  const configs = await getLezgoIaConfigs([{ locationId, timezone }])
+  return configs.get(locationId) ?? defaultAccountConfig(locationId, timezone)
 }

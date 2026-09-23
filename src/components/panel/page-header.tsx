@@ -58,7 +58,7 @@ export function Instrument({
         className,
       )}
     >
-      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5">
         <div className="min-w-0">
           <h2 className="eyebrow">{label}</h2>
           {hint && (

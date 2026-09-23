@@ -42,14 +42,20 @@ export function LinkPicker({
   disabled,
   onPick,
   onSearch,
+  exclude,
+  className,
 }: {
   options: PickerOption[]
   placeholder: string
   empty: string
-  buttonLabel: string
+  buttonLabel: React.ReactNode
   disabled?: boolean
+  /** Para el botón que abre el desplegable, cuando tiene que igualar otra altura. */
+  className?: string
   onPick: (value: string) => void
   onSearch?: (query: string) => Promise<PickerOption[]>
+  /** Valores ya elegidos: no se ofrecen aunque vengan de una búsqueda previa. */
+  exclude?: ReadonlySet<string>
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -73,12 +79,21 @@ export function LinkPicker({
 
   // Mientras llega la respuesta se deja lo último encontrado: parpadear a
   // vacío en cada tecla se lee como "no hay nadie".
-  const shown = !onSearch || !query.trim() ? options : (remote?.items ?? [])
+  const shown = (
+    !onSearch || !query.trim() ? options : (remote?.items ?? [])
+  ).filter((o) => !exclude?.has(o.value))
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        render={<Button size="sm" variant="outline" disabled={disabled} />}
+        render={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            className={className}
+          />
+        }
       >
         {buttonLabel} <ChevronsUpDownIcon aria-hidden />
       </PopoverTrigger>

@@ -2,6 +2,7 @@ import "server-only"
 
 import Stripe from "stripe"
 
+import type { PlanLine } from "@/lib/clients/account"
 import type { Currency } from "@/lib/types"
 
 import {
@@ -190,13 +191,67 @@ export function monthlyAmounts(sub: Stripe.Subscription) {
   return out
 }
 
+/** Los productos de la cuenta son pocos; con sus nombres se lee el plan. */
+async function productNames(): Promise<Map<string, string>> {
+  try {
+    const list = await stripe()
+      .products.list({ limit: 100 })
+      .autoPagingToArray({ limit: 500 })
+    return new Map(list.map((p) => [p.id, p.name]))
+  } catch (error) {
+    wrap(error, "/v1/products")
+  }
+}
+
+/** Día en hora de México: el periodo termina a una hora, no en UTC. */
+const diaDe = (epoch: number) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+  }).format(new Date(epoch * 1000))
+
+export type CustomerSubs = {
+  /** Lo que vale al mes, por moneda: de aquí sale el MRR. */
+  amounts: { amount: number; currency: Currency }[]
+  /** Una entrada por línea de suscripción: de aquí sale el plan. */
+  lines: PlanLine[]
+}
+
+/**
+ * Lo que cada cliente paga hoy. Dos lecturas del mismo viaje: el importe
+ * mensual y la forma del plan —producto, periodicidad y fin del periodo—,
+ * que `lib/clients/account.ts` traduce a membresía y vencimiento.
+ */
 export async function summarizeSubscriptions() {
-  const subs = await listActiveSubscriptions()
-  const out = new Map<string, { amount: number; currency: Currency }[]>()
+  const [subs, names] = await Promise.all([
+    listActiveSubscriptions(),
+    productNames(),
+  ])
+  const out = new Map<string, CustomerSubs>()
   for (const s of subs) {
     const cus = typeof s.customer === "string" ? s.customer : s.customer.id
-    const amounts = monthlyAmounts(s)
-    if (amounts.length) out.set(cus, [...(out.get(cus) ?? []), ...amounts])
+    const entry = out.get(cus) ?? { amounts: [], lines: [] }
+    entry.amounts.push(...monthlyAmounts(s))
+    for (const item of s.items.data) {
+      const price = item.price
+      const rec = price.recurring
+      if (!rec) continue
+      const producto =
+        typeof price.product === "string"
+          ? names.get(price.product)
+          : "name" in price.product
+            ? price.product.name
+            : null
+      entry.lines.push({
+        label: producto || price.nickname || s.description || "",
+        amount: (price.unit_amount ?? 0) * (item.quantity ?? 1),
+        interval: rec.interval,
+        intervalCount: rec.interval_count,
+        renewsAt: item.current_period_end
+          ? diaDe(item.current_period_end)
+          : null,
+      })
+    }
+    out.set(cus, entry)
   }
   return out
 }

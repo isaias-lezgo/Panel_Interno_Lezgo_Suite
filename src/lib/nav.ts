@@ -1,8 +1,10 @@
 import type { LucideIcon } from "lucide-react"
 import {
   Banknote,
+  BotMessageSquare,
   Gauge,
   Hammer,
+  ListChecks,
   Settings,
   Sparkles,
   Users,
@@ -21,6 +23,7 @@ export const nav: NavGroup[] = [
     items: [
       { href: "/clientes", title: "Clientes", icon: Users },
       { href: "/implementaciones", title: "Implementaciones", icon: Hammer },
+      { href: "/pendientes", title: "Pendientes", icon: ListChecks },
       { href: "/facturacion", title: "Facturación", icon: Banknote },
     ],
   },
@@ -28,6 +31,7 @@ export const nav: NavGroup[] = [
     label: "Automatización",
     items: [
       { href: "/copiloto", title: "Copiloto", icon: Sparkles },
+      { href: "/lezgo-ia", title: "Lezgo IA", icon: BotMessageSquare },
       { href: "/ajustes", title: "Ajustes", icon: Settings },
     ],
   },

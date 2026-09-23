@@ -23,21 +23,25 @@ async function main() {
   const db = drizzle(neon(url), { schema })
 
   await db.delete(schema.activity)
+  await db.delete(schema.pendings)
   await db.delete(schema.invoices)
   await db.delete(schema.implementations)
   await db.delete(schema.clientStripeCustomers)
+  await db.delete(schema.clientGhlLocations)
   await db.delete(schema.clientOpportunities)
   await db.delete(schema.clients)
 
   await db.insert(schema.clients).values(demo.clients)
   await db.insert(schema.clientOpportunities).values(demo.clientOpportunities)
   await db.insert(schema.clientStripeCustomers).values(demo.stripeLinks)
+  await db.insert(schema.clientGhlLocations).values(demo.locationLinks)
   await db.insert(schema.implementations).values(demo.implementations)
   await db.insert(schema.invoices).values(demo.invoices)
   await db.insert(schema.activity).values(demo.activity)
+  await db.insert(schema.pendings).values(demo.pendings)
 
   console.log(
-    `Listo: ${demo.clients.length} clientes, ${demo.implementations.length} implementaciones, ${demo.invoices.length} facturas.`,
+    `Listo: ${demo.clients.length} clientes, ${demo.implementations.length} implementaciones, ${demo.invoices.length} facturas, ${demo.pendings.length} pendientes.`,
   )
 }
 

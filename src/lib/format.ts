@@ -87,6 +87,31 @@ export function shortDate(iso: string) {
   })
 }
 
+/**
+ * Fecha de un instante (timestamp con zona), fijada a la hora de México: el
+ * servidor corre en UTC y sin zona fija el día cambiaría entre el HTML y el
+ * navegador en las horas cerca de medianoche.
+ */
+export function stampDate(iso: string) {
+  return new Date(iso).toLocaleDateString(LOCALE, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "America/Mexico_City",
+  })
+}
+
+/** Día y hora de un instante, en hora de México (ver `stampDate`). */
+export function stampDateTime(iso: string) {
+  return new Date(iso).toLocaleString(LOCALE, {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Mexico_City",
+  })
+}
+
 export function fullDate(iso: string) {
   return toDate(iso).toLocaleDateString(LOCALE, {
     day: "numeric",

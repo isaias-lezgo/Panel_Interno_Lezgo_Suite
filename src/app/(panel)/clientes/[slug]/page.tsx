@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
-import { LocationLink } from "@/components/clients/location-link"
+import { LocationLinks } from "@/components/clients/location-link"
 import { StripeLinks } from "@/components/clients/stripe-links"
 import { LinkButton } from "@/components/panel/link-button"
 import {
@@ -53,7 +53,7 @@ export default async function ClientePage({
   const { slug } = await params
   const detail = await getClientDetail(slug)
   if (!detail) notFound()
-  const { client, opportunities, stripe, location, mrr } = detail
+  const { client, opportunities, stripe, locations, mrr } = detail
 
   const [implementations, invoices, activity, stripeOptions, locationOptions] =
     await Promise.all([
@@ -61,11 +61,14 @@ export default async function ClientePage({
       listInvoices(),
       listActivity(40),
       listStripeCustomerOptions(),
-      listFreeLocationOptions(client.id),
+      listFreeLocationOptions(),
     ])
   const currency = baseCurrency()
 
-  const work = implementations.filter((i) => i.clientId === client.id)
+  const work = implementations.filter(
+    (i) =>
+      i.clientId === client.id || i.contacts.some((c) => c.id === client.id),
+  )
   const bills = invoices.filter((i) => i.clientId === client.id)
   const events = activity.filter((a) => a.clientId === client.id).slice(0, 6)
   const owed = bills
@@ -129,12 +132,16 @@ export default async function ClientePage({
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Instrument
-            label="Subcuenta de GoHighLevel"
-            hint={location ? "Enlazada" : "Pendiente de enlazar"}
+            label="Subcuentas de GoHighLevel"
+            hint={
+              locations.length
+                ? `${locations.length} ${locations.length === 1 ? "enlazada" : "enlazadas"}`
+                : "Pendiente de enlazar"
+            }
           >
-            <LocationLink
-              client={client}
-              location={location}
+            <LocationLinks
+              clientId={client.id}
+              links={locations}
               options={locationOptions.options}
               optionsError={locationOptions.error}
             />
@@ -275,7 +282,10 @@ export default async function ClientePage({
                           {item.progress}%
                         </span>
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {item.owner} · entrega {relativeDays(item.dueAt)}
+                          {item.owner ?? "Sin responsable"} ·{" "}
+                          {item.dueAt
+                            ? `entrega ${relativeDays(item.dueAt)}`
+                            : "sin fecha"}
                         </span>
                       </div>
                       {item.blocked && item.blockedReason && (

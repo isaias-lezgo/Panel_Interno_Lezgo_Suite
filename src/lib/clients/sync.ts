@@ -1,6 +1,6 @@
 import "server-only"
 
-import { eq, inArray, max } from "drizzle-orm"
+import { inArray, max } from "drizzle-orm"
 
 import { db, schema } from "@/db"
 import { ghl, GhlError } from "@/lib/ghl/client"
@@ -212,17 +212,17 @@ async function autoLinkStripe(drafts: ClientDraft[]) {
   return found.size
 }
 
+/**
+ * Solo propone subcuenta a quien no tiene ninguna: las siguientes se eligen
+ * a mano. Una subcuenta con fila —enlazada o quitada— no se vuelve a tocar.
+ */
 async function autoLinkLocations(drafts: ClientDraft[]) {
   if (!db || !ghl.isConfigured) return 0
-  const rows = await db
-    .select({ id: schema.clients.id, ghlLocationId: schema.clients.ghlLocationId })
-    .from(schema.clients)
+  const rows = await db.select().from(schema.clientGhlLocations)
   const withLocation = new Set(
-    rows.filter((r) => r.ghlLocationId).map((r) => r.id),
+    rows.filter((r) => r.linkedBy !== "excluded").map((r) => r.clientId),
   )
-  const usedLocations = new Set(
-    rows.map((r) => r.ghlLocationId).filter((id): id is string => Boolean(id)),
-  )
+  const usedLocations = new Set(rows.map((r) => r.ghlLocationId))
 
   const subjects = drafts
     .filter((d) => !withLocation.has(d.id))
@@ -240,11 +240,12 @@ async function autoLinkLocations(drafts: ClientDraft[]) {
     }))
 
   const found = autoLink(subjects, targets, "one")
+  const now = new Date().toISOString()
   for (const [locationId, clientId] of found) {
     await db
-      .update(schema.clients)
-      .set({ ghlLocationId: locationId, ghlLocationLinkedBy: "auto" })
-      .where(eq(schema.clients.id, clientId))
+      .insert(schema.clientGhlLocations)
+      .values({ ghlLocationId: locationId, clientId, linkedBy: "auto", linkedAt: now })
+      .onConflictDoNothing()
   }
   return found.size
 }

@@ -2,6 +2,7 @@
 
 import { refresh } from "next/cache"
 import { eq } from "drizzle-orm"
+import { z } from "zod"
 
 import { db, schema } from "@/db"
 import { syncClientsFromGhl, type SyncResult } from "@/lib/clients/sync"
@@ -93,32 +94,94 @@ export async function unlinkStripeCustomer(customerId: string): Promise<Result> 
   return { ok: true }
 }
 
+/**
+ * Un cliente puede tener varias subcuentas; una subcuenta, un solo dueño.
+ * Como con Stripe, una fila archivada se revive a nombre de quien la elige.
+ */
 export async function linkGhlLocation(
   clientId: string,
   locationId: string,
 ): Promise<Result> {
   if (!db) return { ok: false, error: NO_DB }
   const [taken] = await db
-    .select({ id: schema.clients.id, name: schema.clients.name })
-    .from(schema.clients)
-    .where(eq(schema.clients.ghlLocationId, locationId))
-  if (taken && taken.id !== clientId) {
+    .select({
+      clientId: schema.clientGhlLocations.clientId,
+      linkedBy: schema.clientGhlLocations.linkedBy,
+      name: schema.clients.name,
+    })
+    .from(schema.clientGhlLocations)
+    .innerJoin(
+      schema.clients,
+      eq(schema.clients.id, schema.clientGhlLocations.clientId),
+    )
+    .where(eq(schema.clientGhlLocations.ghlLocationId, locationId))
+  if (taken && taken.linkedBy !== "excluded" && taken.clientId !== clientId) {
     return { ok: false, error: `Esa subcuenta ya es de ${taken.name}.` }
   }
+  const fila = {
+    ghlLocationId: locationId,
+    clientId,
+    linkedBy: "manual" as const,
+    linkedAt: new Date().toISOString(),
+  }
   await db
-    .update(schema.clients)
-    .set({ ghlLocationId: locationId, ghlLocationLinkedBy: "manual" })
-    .where(eq(schema.clients.id, clientId))
+    .insert(schema.clientGhlLocations)
+    .values(fila)
+    .onConflictDoUpdate({
+      target: schema.clientGhlLocations.ghlLocationId,
+      set: fila,
+    })
   refresh()
   return { ok: true }
 }
 
-export async function unlinkGhlLocation(clientId: string): Promise<Result> {
+/** Archiva, no borra: la sincronización no vuelve a proponer la subcuenta. */
+export async function unlinkGhlLocation(locationId: string): Promise<Result> {
   if (!db) return { ok: false, error: NO_DB }
   await db
+    .update(schema.clientGhlLocations)
+    .set({ linkedBy: "excluded" })
+    .where(eq(schema.clientGhlLocations.ghlLocationId, locationId))
+  refresh()
+  return { ok: true }
+}
+
+/**
+ * Las cuatro columnas de cuenta de la tabla de clientes. `null` borra lo
+ * escrito y devuelve la celda a lo que digan Stripe o la etapa de GHL; por
+ * eso cada campo es opcional y `null` es un valor, no un "no lo mandes".
+ */
+const patch = z.object({
+  supportActive: z.boolean().nullable().optional(),
+  licenseDueAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida")
+    .nullable()
+    .optional(),
+  billingPeriod: z.enum(["1m", "3m", "6m", "1y"]).nullable().optional(),
+  membership: z.enum(["start", "growth", "pro", "elite"]).nullable().optional(),
+})
+
+export type AccountPatch = z.infer<typeof patch>
+
+/** Escribe solo a Neon: ni Stripe ni GoHighLevel se enteran de esto. */
+export async function updateClientAccount(
+  clientId: string,
+  input: AccountPatch,
+): Promise<Result> {
+  if (!db) return { ok: false, error: NO_DB }
+  const parsed = patch.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dato inválido." }
+  }
+  if (Object.keys(parsed.data).length === 0) return { ok: true }
+
+  const [row] = await db
     .update(schema.clients)
-    .set({ ghlLocationId: null, ghlLocationLinkedBy: null })
+    .set(parsed.data)
     .where(eq(schema.clients.id, clientId))
+    .returning({ id: schema.clients.id })
+  if (!row) return { ok: false, error: "Ese cliente ya no existe." }
   refresh()
   return { ok: true }
 }

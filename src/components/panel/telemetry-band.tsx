@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRightIcon } from "lucide-react"
+import { ArrowRightIcon, InfoIcon } from "lucide-react"
 
 import {
   Popover,
@@ -9,6 +9,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { StatusChip } from "@/components/signal/status-chip"
 import { money } from "@/lib/format"
 import type { Currency } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -22,8 +23,41 @@ import { cn } from "@/lib/utils"
  * qué se quedó fuera.
  */
 
+type Tone = "live" | "build" | "warn" | "risk" | "idle"
+
+/**
+ * Un registro de los que forman la cifra. Una cuenta de 34 no dice a quién
+ * hay que llamar; la lista sí.
+ */
+export type BandItem = {
+  id: string
+  title: string
+  /** Lo que lo distingue: el cliente, la subcuenta, lo que le falta. */
+  meta?: string
+  /** Etapa o estado. Punto y palabra, como en el resto del panel. */
+  chip?: { tone: Tone; label: string }
+  /** La cifra de la fila, ya formateada con su moneda. */
+  value?: string
+  href: string
+}
+
+/** Los registros detrás de cada celda, en el orden en que se leen. */
+export type BandLists = {
+  ingreso: BandItem[]
+  clientes: BandItem[]
+  proyectos: BandItem[]
+  cobrar: BandItem[]
+  enlaces: BandItem[]
+}
+
 /** La procedencia de una cifra, en el orden en que se lee. */
 type Origin = {
+  /** Los registros que la componen. */
+  items: BandItem[]
+  /** El encabezado de esa lista. */
+  itemsLabel: string
+  /** Qué decir cuando no hay ninguno. */
+  itemsEmpty: string
   /** El sistema del que sale, en una frase. */
   source: string
   /** Las reglas que la forman. */
@@ -51,6 +85,7 @@ export function TelemetryBand({
   voidedInvoices,
   fxDefined,
   stripeConnected,
+  lists,
 }: {
   /** Centavos de `baseCurrency`. */
   mrr: number
@@ -70,8 +105,12 @@ export function TelemetryBand({
   voidedInvoices: number
   fxDefined: boolean
   stripeConnected: boolean
+  lists: BandLists
 }) {
   const ingreso: Origin = {
+    items: lists.ingreso,
+    itemsLabel: "Quién lo paga",
+    itemsEmpty: "Ningún cliente enlazado tiene una suscripción activa.",
     source: stripeConnected
       ? `Stripe — las suscripciones activas de los ${stripeLinkCount} clientes de Stripe enlazados.`
       : "Nadie: falta STRIPE_SECRET_KEY, así que no hay suscripciones que sumar.",
@@ -90,6 +129,9 @@ export function TelemetryBand({
   }
 
   const clientes: Origin = {
+    items: lists.clientes,
+    itemsLabel: "Quiénes son",
+    itemsEmpty: "Ningún contacto tiene una oportunidad ganada.",
     source:
       "GoHighLevel — contactos con al menos una oportunidad ganada en el pipeline Ventas de la subcuenta Lezgo Suite.",
     how: [
@@ -107,6 +149,9 @@ export function TelemetryBand({
   }
 
   const proyectos: Origin = {
+    items: lists.proyectos,
+    itemsLabel: "Cuáles son",
+    itemsEmpty: "Todo lo registrado ya está en producción.",
     source: "El panel — las implementaciones registradas en la base.",
     how: [
       "Cuenta las que todavía no están en producción.",
@@ -121,6 +166,9 @@ export function TelemetryBand({
   }
 
   const cobrar: Origin = {
+    items: lists.cobrar,
+    itemsLabel: "Qué falta cobrar",
+    itemsEmpty: "No hay facturas sin pagar.",
     source: stripeConnected
       ? "Stripe — facturas emitidas en los últimos 12 meses que siguen sin pagarse."
       : "La base — las facturas guardadas en Neon.",
@@ -139,6 +187,9 @@ export function TelemetryBand({
   }
 
   const enlaces: Origin = {
+    items: lists.enlaces,
+    itemsLabel: "A quiénes les falta",
+    itemsEmpty: "Cada cliente activo tiene Stripe y subcuenta.",
     source: "El panel — clientes activos a los que les falta un enlace.",
     how: [
       `${unlinkedNoStripe} sin cliente de Stripe: no se les puede atribuir ningún cobro.`,
@@ -239,6 +290,11 @@ export function TelemetryBand({
   )
 }
 
+/**
+ * La celda abre la lista de registros: es lo que se busca al hacer clic. La
+ * procedencia de la cifra —de qué sistema sale y cómo se calcula— vive
+ * detrás de la (i) junto a la etiqueta, para quien la necesite.
+ */
 function Cell({
   label,
   origin,
@@ -248,80 +304,168 @@ function Cell({
 }: {
   label: string
   origin: Origin
-  /** La cifra, para que el lector de pantalla anuncie qué se va a explicar. */
+  /** La cifra, para que el lector de pantalla anuncie qué se va a abrir. */
   summary: string
   children: React.ReactNode
   className?: string
 }) {
   return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            aria-label={`${label}: ${summary}. Ver de dónde sale.`}
-            className={cn(
-              "border-t border-border px-4 py-4 text-left transition-colors first:border-t-0 hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring aria-expanded:bg-muted/40 sm:border-t-0",
-              className,
-            )}
-          />
-        }
-      >
-        <span className="eyebrow mb-2.5 block">{label}</span>
-        {children}
-      </PopoverTrigger>
+    <div
+      className={cn(
+        "relative border-t border-border px-4 py-4 transition-colors first:border-t-0 hover:bg-muted/40 has-[[aria-expanded=true]]:bg-muted/40 sm:border-t-0",
+        className,
+      )}
+    >
+      <div className="mb-2.5 flex items-center gap-1">
+        <span className="eyebrow">{label}</span>
+        <Popover>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                aria-label={`De dónde sale ${label}`}
+                // Por encima de la superficie que abre la lista: dos destinos
+                // distintos no pueden compartir el mismo clic.
+                className="relative z-10 -m-1 rounded p-1 text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              />
+            }
+          >
+            <InfoIcon className="size-3.5" aria-hidden />
+          </PopoverTrigger>
 
-      <PopoverContent align="start" className="w-80 gap-0 p-0">
-        <div className="border-b border-border px-3.5 py-3">
-          <PopoverTitle className="text-sm font-medium">{label}</PopoverTitle>
-          <p className="num mt-0.5 text-xs text-muted-foreground">{summary}</p>
-        </div>
+          <PopoverContent align="start" className="w-80 gap-0 p-0">
+            <div className="border-b border-border px-3.5 py-3">
+              <PopoverTitle className="text-sm font-medium">
+                {label}
+              </PopoverTitle>
+              <p className="num mt-0.5 text-xs text-muted-foreground">
+                {summary}
+              </p>
+            </div>
 
-        <div className="space-y-3 px-3.5 py-3">
-          <div>
-            <p className="eyebrow mb-1.5">De dónde sale</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {origin.source}
+            <div className="space-y-3 px-3.5 py-3">
+              <div>
+                <p className="eyebrow mb-1.5">De dónde sale</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {origin.source}
+                </p>
+              </div>
+
+              <div>
+                <p className="eyebrow mb-1.5">Cómo se calcula</p>
+                <ul className="space-y-1">
+                  {origin.how.map((linea) => (
+                    <li
+                      key={linea}
+                      className="flex gap-1.5 text-xs leading-relaxed text-muted-foreground"
+                    >
+                      <span aria-hidden className="text-muted-foreground/50">
+                        ·
+                      </span>
+                      {linea}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {origin.excluded && (
+                <div>
+                  <p className="eyebrow mb-1.5">Qué queda fuera</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {origin.excluded}
+                  </p>
+                </div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <Popover>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`${label}: ${summary}. Ver cuáles son.`}
+              // El ::after estira el clic a toda la celda sin anidar un botón
+              // dentro de otro.
+              className="block w-full text-left after:absolute after:inset-0 after:outline-offset-[-2px] focus-visible:z-10 focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
+            />
+          }
+        >
+          {children}
+        </PopoverTrigger>
+
+        <PopoverContent align="start" className="w-88 gap-0 p-0">
+          <div className="border-b border-border px-3.5 py-3">
+            <PopoverTitle className="text-sm font-medium">
+              {origin.itemsLabel}
+            </PopoverTitle>
+            <p className="num mt-0.5 text-xs text-muted-foreground">
+              {label} · {summary}
             </p>
           </div>
 
-          <div>
-            <p className="eyebrow mb-1.5">Cómo se calcula</p>
-            <ul className="space-y-1">
-              {origin.how.map((linea) => (
-                <li
-                  key={linea}
-                  className="flex gap-1.5 text-xs leading-relaxed text-muted-foreground"
-                >
-                  <span aria-hidden className="text-muted-foreground/50">
-                    ·
-                  </span>
-                  {linea}
-                </li>
-              ))}
-            </ul>
+          <div className="px-3.5 py-3">
+            {origin.items.length === 0 ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {origin.itemsEmpty}
+              </p>
+            ) : (
+              // Con más de ocho la lista se desplaza sola en vez de estirar el
+              // popover fuera de la pantalla.
+              <ul className="-mx-1.5 max-h-72 overflow-y-auto">
+                {origin.items.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      href={item.href}
+                      className="block rounded-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                    >
+                      <span className="flex items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                          {item.title}
+                        </span>
+                        {item.value && (
+                          <span className="num shrink-0 text-xs">
+                            {item.value}
+                          </span>
+                        )}
+                      </span>
+                      {(item.chip || item.meta) && (
+                        <span className="mt-1 flex items-center gap-1.5">
+                          {item.chip && (
+                            <StatusChip
+                              tone={item.chip.tone}
+                              className="shrink-0 px-1.5 py-0 text-[11px]"
+                            >
+                              {item.chip.label}
+                            </StatusChip>
+                          )}
+                          {item.meta && (
+                            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                              {item.meta}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          {origin.excluded && (
-            <div>
-              <p className="eyebrow mb-1.5">Qué queda fuera</p>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {origin.excluded}
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-border px-3.5 py-2.5">
-          <Link
-            href={origin.href}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-          >
-            {origin.hrefLabel}
-            <ArrowRightIcon className="size-3" aria-hidden />
-          </Link>
-        </div>
-      </PopoverContent>
-    </Popover>
+          <div className="border-t border-border px-3.5 py-2.5">
+            <Link
+              href={origin.href}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              {origin.hrefLabel}
+              <ArrowRightIcon className="size-3" aria-hidden />
+            </Link>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
   )
 }

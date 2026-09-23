@@ -18,10 +18,15 @@ import {
   PageHeader,
 } from "@/components/panel/page-header"
 import { TelemetryBand } from "@/components/panel/telemetry-band"
-import { StatusChip } from "@/components/signal/status-chip"
-import { money, relativeDays, shortDate } from "@/lib/format"
+import type { BandItem } from "@/components/panel/telemetry-band"
+import {
+  invoiceStatusLabel,
+  stageLabel,
+  StatusChip,
+} from "@/components/signal/status-chip"
+import { money, moneySigned, relativeDays, shortDate } from "@/lib/format"
 import { getPortfolioSummary, listActivity } from "@/lib/repository"
-import type { ActivityKind } from "@/lib/types"
+import type { ActivityKind, ImplementationStage } from "@/lib/types"
 
 export const metadata = { title: "Tablero" }
 
@@ -90,6 +95,102 @@ export default async function TableroPage() {
     })),
   ]
 
+  // Cada cifra de la banda abre la lista de registros que la forman: un 34
+  // no dice a quién hay que llamar, y salir a buscarlo a otra vista rompe el
+  // hilo de lo que se estaba leyendo.
+  const base = summary.baseCurrency
+
+  const stageRank: Record<ImplementationStage, number> = {
+    scoping: 0,
+    building: 1,
+    review: 2,
+    launch: 3,
+    live: 4,
+  }
+
+  const activeRows = summary.rows.filter((c) => !c.orphaned)
+
+  const ingresoItems: BandItem[] = activeRows
+    .filter((c) => (c.mrr ?? 0) > 0 || c.unconvertedSubs > 0)
+    .sort((a, b) => (b.mrr ?? 0) - (a.mrr ?? 0))
+    .map((c) => ({
+      id: c.id,
+      title: c.name,
+      value: c.mrr ? money(c.mrr, base) : "—",
+      meta:
+        c.unconvertedSubs > 0
+          ? "Cobra en USD: fuera del total sin tipo de cambio."
+          : undefined,
+      href: `/clientes/${c.slug}`,
+    }))
+
+  const clientesItems: BandItem[] = activeRows
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, "es"))
+    .map((c) => ({
+      id: c.id,
+      title: c.name,
+      value: c.mrr ? money(c.mrr, base) : undefined,
+      // Casi todos comparten etapa: con 34 filas, 34 chips iguales serían
+      // adorno. La etapa va en texto y solo la cifra pide la vista.
+      meta: [c.stage, c.contactName !== c.name ? c.contactName : null]
+        .filter(Boolean)
+        .join(" · "),
+      href: `/clientes/${c.slug}`,
+    }))
+
+  const proyectosItems: BandItem[] = summary.implementations
+    .filter((i) => i.stage !== "live")
+    .sort((a, b) => stageRank[a.stage] - stageRank[b.stage])
+    .map((i) => {
+      const etapa = stageLabel[i.stage]
+      // La implementación suele llamarse como la subcuenta; repetirlo debajo
+      // no agrega nada.
+      const donde = i.clientId ? nameOf(i.clientId) : i.ghlLocationName
+      const lugar = donde && donde !== i.name ? donde : null
+      return {
+        id: i.id,
+        title: i.name,
+        value: `${i.progress}%`,
+        chip: i.blocked ? { tone: "risk" as const, label: "Bloqueado" } : etapa,
+        meta: i.blocked
+          ? [etapa.label, lugar].filter(Boolean).join(" · ")
+          : (lugar ?? undefined),
+        href: "/implementaciones",
+      }
+    })
+
+  const cobrarItems: BandItem[] = summary.invoices
+    .filter((i) => i.status === "overdue" || i.status === "due")
+    .sort(
+      (a, b) =>
+        Number(b.status === "overdue") - Number(a.status === "overdue") ||
+        (b.amountBase ?? 0) - (a.amountBase ?? 0),
+    )
+    .map((i) => ({
+      id: i.id,
+      title: i.clientId ? nameOf(i.clientId) : i.customerName,
+      value: moneySigned(i.amount, i.currency, base),
+      chip: invoiceStatusLabel[i.status],
+      meta:
+        i.amountBase === null
+          ? `${i.number} · sin tipo de cambio, fuera del total`
+          : i.number,
+      href: "/facturacion",
+    }))
+
+  const enlacesItems: BandItem[] = summary.unlinked.map((c) => ({
+    id: c.id,
+    title: c.name,
+    meta:
+      c.stripeCount === 0 && c.locationNames.length === 0
+        ? "Sin cliente de Stripe ni subcuenta."
+        : c.stripeCount === 0
+          ? "Sin cliente de Stripe."
+          : "Sin subcuenta de GoHighLevel.",
+    href: `/clientes/${c.slug}`,
+  }))
+
   return (
     <div className="blueprint">
       <PageHeader
@@ -117,7 +218,7 @@ export default async function TableroPage() {
             summary.unlinked.filter((c) => c.stripeCount === 0).length
           }
           unlinkedNoLocation={
-            summary.unlinked.filter((c) => !c.ghlLocationId).length
+            summary.unlinked.filter((c) => c.locationNames.length === 0).length
           }
           stripeLinkCount={summary.stripeLinkCount}
           orphanedCount={summary.orphanedCount}
@@ -125,6 +226,13 @@ export default async function TableroPage() {
           voidedInvoices={summary.voidedInvoices}
           fxDefined={summary.fxDefined}
           stripeConnected={summary.stripeConnected}
+          lists={{
+            ingreso: ingresoItems,
+            clientes: clientesItems,
+            proyectos: proyectosItems,
+            cobrar: cobrarItems,
+            enlaces: enlacesItems,
+          }}
         />
 
         <div className="grid gap-4 lg:grid-cols-2">

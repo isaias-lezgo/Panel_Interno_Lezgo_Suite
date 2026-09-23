@@ -44,13 +44,13 @@ export function CommandMenu({ clients }: { clients: Client[] }) {
         variant="outline"
         size="sm"
         onClick={() => setOpen(true)}
-        className="w-full max-w-72 justify-between text-muted-foreground"
+        className="w-full min-w-0 max-w-72 justify-between text-muted-foreground"
       >
-        <span className="flex items-center gap-2">
-          <SearchIcon className="size-3.5" />
-          Buscar clientes y secciones
+        <span className="flex min-w-0 items-center gap-2">
+          <SearchIcon className="size-3.5 shrink-0" />
+          <span className="truncate">Buscar clientes y secciones</span>
         </span>
-        <kbd className="num rounded border border-border px-1 text-[10px]">
+        <kbd className="num hidden rounded border border-border px-1 text-[10px] sm:inline">
           ⌘K
         </kbd>
       </Button>

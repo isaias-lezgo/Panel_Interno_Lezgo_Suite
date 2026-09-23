@@ -6,10 +6,37 @@
  */
 export type LinkedBy = "auto" | "manual" | "excluded"
 
+/** Cada cuánto se cobra la licencia, tal como se vende. */
+export type BillingPeriod = "1m" | "3m" | "6m" | "1y"
+
+/** Los cuatro niveles del catálogo de Lezgo Suite. */
+export type Membership = "start" | "growth" | "pro" | "elite"
+
+/**
+ * De dónde salió el dato de una columna de cuenta. `manual` lo escribió
+ * alguien del equipo y manda sobre todo lo demás; `stripe` y `ghl` se
+ * deducen en cada lectura y cambian solos.
+ */
+export type AccountSource = "manual" | "stripe" | "ghl"
+
+/** Un valor deducido que sabe de dónde vino. `null` es "no se sabe". */
+export type Derived<T> = { value: T | null; source: AccountSource | null }
+
+/**
+ * Las cuatro lecturas de cuenta de un cliente: lo que paga, cada cuánto,
+ * hasta cuándo y si lleva servicio técnico.
+ */
+export type ClientAccount = {
+  support: Derived<boolean>
+  licenseDueAt: Derived<string>
+  period: Derived<BillingPeriod>
+  membership: Derived<Membership>
+}
+
 /**
  * Un cliente es un contacto de la subcuenta Lezgo Suite con al menos una
- * oportunidad ganada. Los enlaces a Stripe viven en `StripeLink`; el de la
- * subcuenta de GHL, aquí mismo.
+ * oportunidad ganada. Los enlaces viven aparte: a Stripe en `StripeLink`,
+ * a sus subcuentas de GHL en `LocationLink`.
  */
 export type Client = {
   /** Id del contacto en GHL. Agrupa sus oportunidades. */
@@ -21,9 +48,6 @@ export type Client = {
   email: string | null
   phone: string | null
   ghlContactId: string
-  /** Subcuenta del cliente. `null` hasta que se enlaza. */
-  ghlLocationId: string | null
-  ghlLocationLinkedBy: LinkedBy | null
   /** Etapa de su oportunidad más reciente, tal cual la nombra el pipeline. */
   stage: string
   /** Cierre más antiguo entre sus oportunidades. */
@@ -32,6 +56,14 @@ export type Client = {
   /** No apareció en la última sincronización. No se borra. */
   orphaned: boolean
   notes: string | null
+  /**
+   * Lo escrito a mano en la tabla de clientes. `null` deja que el dato se
+   * deduzca de Stripe o de la etapa en GHL: la sincronización no los toca.
+   */
+  supportActive: boolean | null
+  licenseDueAt: string | null
+  billingPeriod: BillingPeriod | null
+  membership: Membership | null
 }
 
 export type ClientOpportunity = {
@@ -53,18 +85,28 @@ export type StripeLink = {
   linkedAt: string
 }
 
+export type LocationLink = {
+  ghlLocationId: string
+  clientId: string
+  linkedBy: LinkedBy
+  linkedAt: string
+}
+
 /**
  * Formas de vista que arma el repositorio. Viven aquí y no en
  * `repository.ts` porque ese módulo es `server-only` y los componentes
  * cliente necesitan importar los tipos.
  */
 export type ClientRow = Client & {
-  locationName: string | null
+  /** Nombres de sus subcuentas enlazadas; vacío si no tiene ninguna. */
+  locationNames: string[]
   stripeCount: number
   /** Centavos en la moneda base; `null` si no hay nada que sumar. */
   mrr: number | null
   /** Suscripciones activas que no se pudieron convertir a la moneda base. */
   unconvertedSubs: number
+  /** Membresía, periodicidad, vencimiento y servicio técnico ya resueltos. */
+  account: ClientAccount
 }
 
 export type StripeCustomerOption = {
@@ -90,7 +132,7 @@ export type ClientDetail = {
     active: boolean
     mrr: number | null
   })[]
-  location: LocationOption | null
+  locations: (LocationLink & { name: string; email: string | null })[]
   mrr: number | null
 }
 
@@ -148,10 +190,48 @@ export type ChecklistItem = {
   position: number
 }
 
+export type ImplementationNote = {
+  id: string
+  body: string
+  /** ISO con zona. */
+  createdAt: string
+}
+
 export type Implementation = ImplementationRow & {
   contacts: ImplementationContact[]
   /** Ordenado: cada punto principal seguido de sus sub-puntos. */
   checklist: ChecklistItem[]
+  /** La más reciente primero. */
+  notes: ImplementationNote[]
+}
+
+/**
+ * Un pendiente: una frase y, si viene al caso, de qué subcuenta es. Lo que
+ * necesita fecha, responsable o checklist es una implementación, no esto.
+ */
+export type Pending = {
+  id: string
+  body: string
+  /** `null` a propósito: un pendiente puede no ser de ninguna subcuenta. */
+  ghlLocationId: string | null
+  /** Nombre al escribirlo; sirve de respaldo cuando GHL no contesta. */
+  ghlLocationName: string | null
+  done: boolean
+  /** ISO con zona, `null` mientras siga abierto. */
+  doneAt: string | null
+  /** ISO con zona. */
+  createdAt: string
+}
+
+/** Los pendientes de una subcuenta, ya ordenados para pintarse. */
+export type PendingGroup = {
+  /** `null` en el grupo "Sin subcuenta", que siempre va al final. */
+  locationId: string | null
+  name: string
+  /** El más viejo primero: es el que más lleva esperando. */
+  open: Pending[]
+  /** El último hecho primero. */
+  done: Pending[]
 }
 
 export type Currency = "mxn" | "usd"

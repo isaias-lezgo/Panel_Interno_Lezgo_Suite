@@ -1,19 +1,14 @@
 import type { Metadata } from "next"
-import { Archivo, Inter_Tight, JetBrains_Mono } from "next/font/google"
+import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google"
 
 import { ThemeProvider } from "@/components/providers/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
-const display = Archivo({
+const body = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  variable: "--font-display",
-})
-
-const body = Inter_Tight({
-  subsets: ["latin"],
+  weight: ["400", "500", "600"],
   variable: "--font-body",
 })
 
@@ -39,7 +34,7 @@ export default function RootLayout({
     <html
       lang="es"
       suppressHydrationWarning
-      className={`${display.variable} ${body.variable} ${data.variable}`}
+      className={`${body.variable} ${data.variable}`}
     >
       <body>
         <ThemeProvider

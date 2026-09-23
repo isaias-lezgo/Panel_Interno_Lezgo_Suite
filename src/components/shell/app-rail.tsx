@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -16,18 +17,19 @@ export function AppRail({ ghlConnected }: { ghlConnected: boolean }) {
     >
       <Link
         href="/"
-        className="flex items-center gap-3 px-5 py-5 focus-visible:outline-offset-[-2px]"
+        aria-label="Lezgo Suite, ir al tablero"
+        className="flex h-16 items-center justify-center border-b border-border bg-brand-plate focus-visible:outline-offset-[-2px]"
       >
-        <span aria-hidden className="h-7 w-[3px] rounded-full bg-primary" />
-        <span className="leading-none">
-          <span className="display block text-[17px] font-bold tracking-[-0.03em]">
-            LEZGO
-          </span>
-          <span className="eyebrow mt-1 block">Suite</span>
-        </span>
+        <Image
+          src="/logo-lezgo-suite.png"
+          alt=""
+          width={40}
+          height={40}
+          priority
+        />
       </Link>
 
-      <div className="flex-1 space-y-6 px-3 py-2">
+      <div className="flex-1 space-y-6 px-3 py-4">
         {nav.map((group) => (
           <div key={group.label}>
             <p className="eyebrow px-2 pb-2">{group.label}</p>
