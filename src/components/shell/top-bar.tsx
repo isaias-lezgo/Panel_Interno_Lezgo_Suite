@@ -8,13 +8,14 @@ import type { Client } from "@/lib/types"
 
 export function TopBar({ clients }: { clients: Client[] }) {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md md:px-6">
+    // `dark` fija los tokens oscuros en la barra, sea cual sea el tema.
+    <header className="dark sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-brand-plate px-4 text-foreground md:px-6">
       <Link
         href="/"
         aria-label="Lezgo Suite, ir al tablero"
-        className="grid size-8 shrink-0 place-items-center rounded-md bg-brand-plate md:hidden"
+        className="grid size-8 shrink-0 place-items-center rounded-md md:hidden"
       >
-        <Image src="/logo-lezgo-suite.png" alt="" width={24} height={24} />
+        <Image src="/logo-lezgo-casa.png" alt="" width={24} height={24} />
       </Link>
 
       <div className="min-w-0 flex-1">

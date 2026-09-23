@@ -15,16 +15,17 @@ export function AppRail({ ghlConnected }: { ghlConnected: boolean }) {
       aria-label="Secciones del panel"
       className="hidden w-60 shrink-0 flex-col border-r border-border bg-rail md:flex"
     >
+      {/* -mr-px tapa el borde derecho del rail: la franja oscura sigue sin corte. */}
       <Link
         href="/"
         aria-label="Lezgo Suite, ir al tablero"
-        className="flex h-16 items-center justify-center border-b border-border bg-brand-plate focus-visible:outline-offset-[-2px]"
+        className="dark -mr-px flex h-14 items-center justify-center border-b border-border bg-brand-plate focus-visible:outline-offset-[-2px]"
       >
         <Image
-          src="/logo-lezgo-suite.png"
+          src="/logo-lezgo-casa.png"
           alt=""
-          width={40}
-          height={40}
+          width={36}
+          height={36}
           priority
         />
       </Link>
