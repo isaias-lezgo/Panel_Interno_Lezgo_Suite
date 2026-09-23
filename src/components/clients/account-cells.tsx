@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { membershipLabel, periodLabel } from "@/lib/clients/account"
 import { dueStatus } from "@/lib/implementations/due"
 import type {
   AccountSource,
@@ -30,20 +31,6 @@ import { cn } from "@/lib/utils"
  * lo que alguien escribió. Elegir "Automático" borra lo escrito y devuelve
  * la celda a Stripe o a la etapa de GHL.
  */
-
-export const membershipLabel: Record<Membership, string> = {
-  start: "Start",
-  growth: "Growth",
-  pro: "Pro",
-  elite: "Elite",
-}
-
-export const periodLabel: Record<BillingPeriod, string> = {
-  "1m": "1 mes",
-  "3m": "3 meses",
-  "6m": "6 meses",
-  "1y": "1 año",
-}
 
 const origen: Record<AccountSource, string> = {
   manual: "Escrito a mano.",

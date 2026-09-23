@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { SearchIcon } from "lucide-react"
+import { SearchIcon, XIcon } from "lucide-react"
 
 import { stageTone, StatusChip } from "@/components/signal/status-chip"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -21,8 +22,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  applyFilters,
+  isActive,
+  noFilters,
+  optionsFor,
+  without,
+  type ColumnFilters,
+} from "@/lib/clients/filters"
 import { money, shortDate } from "@/lib/format"
 import type { ClientRow, Currency } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 import {
   DueCell,
@@ -30,6 +40,7 @@ import {
   PeriodCell,
   SupportCell,
 } from "./account-cells"
+import { RangeFilter, SetFilter } from "./column-filter"
 import {
   ColumnPicker,
   columnLabel,
@@ -74,29 +85,34 @@ export function ClientsTable({
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("todos")
   const [sort, setSort] = useState<SortKey>("mrr")
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(noFilters)
   const picker = useColumns()
   const visible = useMemo(
     () => new Set(picker.columns),
     [picker.columns],
   )
 
-  const rows = useMemo(() => {
+  // Búsqueda y filtro rápido primero; los de columna cuentan sobre lo que queda.
+  const base = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return clients
-      .filter((c) => {
-        if (filter === "sin_enlazar" && c.stripeCount > 0 && c.locationNames.length > 0) {
-          return false
-        }
-        if (filter === "huerfanos" && !c.orphaned) return false
-        if (filter === "por_vencer" && !enTreintaDias(c.account.licenseDueAt.value)) {
-          return false
-        }
-        if (!q) return true
-        return [c.name, c.contactName, c.email ?? "", ...c.locationNames].some(
-          (s) => s.toLowerCase().includes(q),
-        )
-      })
-      .sort((a, b) => {
+    return clients.filter((c) => {
+      if (filter === "sin_enlazar" && c.stripeCount > 0 && c.locationNames.length > 0) {
+        return false
+      }
+      if (filter === "huerfanos" && !c.orphaned) return false
+      if (filter === "por_vencer" && !enTreintaDias(c.account.licenseDueAt.value)) {
+        return false
+      }
+      if (!q) return true
+      return [c.name, c.contactName, c.email ?? "", ...c.locationNames].some(
+        (s) => s.toLowerCase().includes(q),
+      )
+    })
+  }, [clients, query, filter])
+
+  const rows = useMemo(
+    () =>
+      applyFilters(base, columnFilters, visible).sort((a, b) => {
         if (sort === "name") return a.name.localeCompare(b.name, "es")
         if (sort === "wonAt") return b.wonAt.localeCompare(a.wonAt)
         if (sort === "licenseDueAt") {
@@ -106,8 +122,40 @@ export function ClientsTable({
           return x.localeCompare(y)
         }
         return (b.mrr ?? -1) - (a.mrr ?? -1)
-      })
-  }, [clients, query, filter, sort])
+      }),
+    [base, columnFilters, visible, sort],
+  )
+
+  const shownColumns = columnOrder.filter((k) => visible.has(k))
+  const activeFilters = shownColumns.filter((k) =>
+    isActive(k, columnFilters),
+  ).length
+
+  const filterFor = (k: ColumnKey) => {
+    const label = columnLabel[k]
+    if (k === "mrr") {
+      return (
+        <RangeFilter
+          label={label}
+          currency={currency}
+          value={columnFilters.mrr}
+          onChange={(mrr) => setColumnFilters((f) => ({ ...f, mrr }))}
+        />
+      )
+    }
+    // El conteo de cada opción dice cuántas filas quedarían al marcarla.
+    const pool = applyFilters(base, without(columnFilters, k), visible)
+    return (
+      <SetFilter
+        label={label}
+        options={optionsFor(k, pool)}
+        selected={columnFilters.sets[k] ?? []}
+        onChange={(next) =>
+          setColumnFilters((f) => ({ ...f, sets: { ...f.sets, [k]: next } }))
+        }
+      />
+    )
+  }
 
   return (
     <div>
@@ -154,34 +202,57 @@ export function ClientsTable({
 
         <ColumnPicker {...picker} />
 
+        {activeFilters > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setColumnFilters(noFilters)}
+          >
+            <XIcon />
+            Quitar filtros de columna
+            <span className="num text-muted-foreground">{activeFilters}</span>
+          </Button>
+        )}
+
         <span className="num ml-auto text-xs text-muted-foreground">
           {rows.length} de {clients.length}
         </span>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-          Ningún cliente coincide con ese filtro.
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Cliente</TableHead>
+              {shownColumns.map((k) => (
+                <TableHead
+                  key={k}
+                  className={alignRight[k] ? "text-right" : undefined}
+                >
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1",
+                      alignRight[k] && "flex-row-reverse",
+                    )}
+                  >
+                    {columnLabel[k]}
+                    {filterFor(k)}
+                  </span>
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 && (
               <TableRow>
-                <TableHead>Cliente</TableHead>
-                {columnOrder
-                  .filter((k) => visible.has(k))
-                  .map((k) => (
-                    <TableHead
-                      key={k}
-                      className={alignRight[k] ? "text-right" : undefined}
-                    >
-                      {columnLabel[k]}
-                    </TableHead>
-                  ))}
+                <TableCell
+                  colSpan={shownColumns.length + 1}
+                  className="py-10 text-center text-sm text-muted-foreground"
+                >
+                  Ningún cliente coincide con esos filtros.
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
+            )}
               {rows.map((c) => (
                 <TableRow key={c.id} className="group">
                   <TableCell>
@@ -292,10 +363,9 @@ export function ClientsTable({
                   )}
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }

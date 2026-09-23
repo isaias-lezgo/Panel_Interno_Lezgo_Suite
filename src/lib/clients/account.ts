@@ -15,6 +15,20 @@ import type {
  * dos cosas. Puro para poder probarlo sin red.
  */
 
+export const membershipLabel: Record<Membership, string> = {
+  start: "Start",
+  growth: "Growth",
+  pro: "Pro",
+  elite: "Elite",
+}
+
+export const periodLabel: Record<BillingPeriod, string> = {
+  "1m": "1 mes",
+  "3m": "3 meses",
+  "6m": "6 meses",
+  "1y": "1 año",
+}
+
 /** Una línea de suscripción activa de Stripe, ya aplanada. */
 export type PlanLine = {
   /** Nombre del producto; el apodo del precio cuando no hay producto. */

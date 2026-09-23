@@ -14,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import type { ClientColumn } from "@/lib/clients/filters"
 
 /**
  * Qué columnas se ven en la tabla de clientes. Son diez y no caben juntas
@@ -22,16 +23,7 @@ import {
  * ella la fila no dice de quién habla.
  */
 
-export type ColumnKey =
-  | "etapa"
-  | "membresia"
-  | "soporte"
-  | "periodicidad"
-  | "vencimiento"
-  | "subcuenta"
-  | "stripe"
-  | "mrr"
-  | "cerrado"
+export type ColumnKey = ClientColumn
 
 export const columnLabel: Record<ColumnKey, string> = {
   etapa: "Etapa",

@@ -240,6 +240,9 @@ deducido y la sync no lo toca; vacío vuelve a "automático". En gris lo
 deducido, en negro lo escrito. Las columnas visibles se eligen desde
 "Columnas" y se guardan en el navegador (`src/components/clients/columns.tsx`):
 son diez y no caben juntas en un portátil.
+Cada encabezado lleva su filtro (`src/lib/clients/filters.ts`): valores a
+marcar con su conteo —que cuenta sobre lo que dejan los demás filtros— y
+rango para el MRR. Una columna escondida no filtra.
 
 **Lezgo IA.** El producto aún no existe; la vista es una vista previa sobre
 datos reales. Con GHL y Neon, `getLezgoIaData()` toma las subcuentas de
@@ -307,7 +310,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 11 archivos: Stripe, clientes, entregas, pendientes y reintento
+pnpm test         # vitest, 13 archivos: Stripe, clientes, filtros, entregas, pendientes y reintento
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
