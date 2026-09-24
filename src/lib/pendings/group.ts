@@ -60,7 +60,7 @@ export function groupPendings(
 
 /**
  * El orden nuevo tras soltar `moved` en el lugar de `target`. Se calcula
- * sobre todos los grupos con subcuenta, también los que "Ver hechos" tiene
+ * sobre todos los grupos con subcuenta, también los que "Ver tareas realizadas" tiene
  * escondidos, y se guarda completo: desde el primer arrastre, cada
  * subcuenta de la pestaña queda con su lugar explícito.
  */

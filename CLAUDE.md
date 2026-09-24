@@ -195,7 +195,7 @@ se escribe entra en la pestaña abierta, y la última abierta se recuerda en la
 cookie `pendientes_tab`, que lee el servidor para no parpadear. Se escriben desde la caja de arriba, que recuerda la
 subcuenta entre un pendiente y el siguiente, o desde la caja al pie de cada
 grupo, donde la subcuenta ya viene puesta. Marcar hecho no borra: el renglón
-se tacha y baja al pie de su grupo, y el interruptor "Ver hechos" los
+se tacha y baja al pie de su grupo, y el interruptor "Ver tareas realizadas" los
 esconde. No se editan: se borran y se vuelven a escribir. Los grupos se
 arrastran arriba y abajo desde el asa de su encabezado (también con teclado:
 espacio, flechas, espacio); cada persona guarda su orden en

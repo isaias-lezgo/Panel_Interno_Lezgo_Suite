@@ -206,9 +206,12 @@ export function PendingList({
                 size="sm"
                 checked={showDone}
                 onCheckedChange={setShowDone}
-                disabled={done === 0}
+                // Sin hechos no hay qué encender, pero lo encendido siempre
+                // se puede apagar: al cambiar de pestaña o desmarcar el
+                // último hecho, la cuenta baja a 0 con el interruptor puesto.
+                disabled={done === 0 && !showDone}
               />
-              Ver hechos
+              Ver tareas realizadas
             </label>
           }
         >
@@ -227,7 +230,7 @@ export function PendingList({
           {shown.length === 0 ? (
             <EmptyState title={done > 0 ? "Nada pendiente" : "Sin pendientes"}>
               {done > 0
-                ? "Todo lo escrito está hecho. Enciende “Ver hechos” para repasarlo."
+                ? "Todo lo escrito está hecho. Enciende “Ver tareas realizadas” para repasarlo."
                 : "Escribe el primero arriba. Una frase basta."}
             </EmptyState>
           ) : (
