@@ -188,8 +188,11 @@ o vencida en rojo, ≤ 7 en amarillo, más en verde, sin fecha en azul.
 
 **Pendientes.** Lo ligero al lado de las implementaciones: una frase y, si
 viene al caso, la subcuenta de la que es (`pendings`). Sin fecha, sin
-responsable, sin prioridad, sin checklist — lo que necesita eso es una
-implementación. Se escriben desde la caja de arriba, que recuerda la
+prioridad, sin checklist — lo que necesita eso es una implementación. Cada
+pendiente es de una persona (`owner`): Juan Carlos, Isaías Rios o Ivan
+Salazar, fijos en `src/lib/pendings/owners.ts`, una pestaña cada uno. Lo que
+se escribe entra en la pestaña abierta, y la última abierta se recuerda en la
+cookie `pendientes_tab`, que lee el servidor para no parpadear. Se escriben desde la caja de arriba, que recuerda la
 subcuenta entre un pendiente y el siguiente, o desde la caja al pie de cada
 grupo, donde la subcuenta ya viene puesta. Marcar hecho no borra: el renglón
 se tacha y baja al pie de su grupo, y el interruptor "Ver hechos" los
@@ -310,7 +313,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 13 archivos: Stripe, clientes, filtros, entregas, pendientes y reintento
+pnpm test         # vitest, 14 archivos: Stripe, clientes, filtros, entregas, pendientes, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
@@ -336,7 +339,7 @@ devuelven un error explicado en la interfaz.
 | `COPILOT_MODEL` | Sobrescribe el modelo por defecto |
 | `STRIPE_SECRET_KEY` | Clave de Stripe. Sin ella, facturación sigue en Neon/demo |
 | `STRIPE_FX_USD_MXN` | Tipo de cambio USD→MXN para normalizar los KPI |
-| `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`src/proxy.ts`). Sin contraseña en local no pide login |
+| `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados
 
@@ -346,8 +349,11 @@ devuelven un error explicado en la interfaz.
   producción** en `panel-interno-lezgo-suite.vercel.app`. Producción usa la
   misma base de Neon que local. Al conectar Neon, usa una rama nueva y
   exclusiva.
-- **El panel está detrás de un candado** (`src/proxy.ts`): HTTP Basic con
-  `PANEL_USER` y `PANEL_PASSWORD`. En producción, sin `PANEL_PASSWORD` no
+- **El panel está detrás de un candado** (`src/proxy.ts`): pantalla
+  `/entrar` con `PANEL_USER` y `PANEL_PASSWORD`, y una cookie `httpOnly`
+  firmada de 30 días (`src/lib/auth/session.ts`). La llave sale de la
+  contraseña: cambiarla cierra todas las sesiones. Sin sesión, las páginas
+  redirigen a `/entrar?next=` y las APIs responden 401. En producción, sin `PANEL_PASSWORD` no
   entra nadie. La protección de Vercel del proyecto es la estándar, que **no**
   cubre el dominio de producción: el candado es lo único que lo cierra. No lo
   quites ni lo relajes sin reemplazo.

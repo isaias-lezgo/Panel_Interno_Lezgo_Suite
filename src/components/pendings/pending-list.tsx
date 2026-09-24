@@ -14,7 +14,15 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { groupPendings, SIN_SUBCUENTA } from "@/lib/pendings/group"
+import {
+  isPendingOwner,
+  OWNER_COOKIE,
+  ownerName,
+  PENDING_OWNERS,
+  type PendingOwner,
+} from "@/lib/pendings/owners"
 import type { LocationOption, Pending, PendingGroup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -26,9 +34,15 @@ type Edit =
   | { type: "delete"; id: string }
 
 /** Un pendiente recién escrito, mientras el servidor confirma. */
-const draft = (body: string, locationId: string | null, name: string | null): Pending => ({
+const draft = (
+  body: string,
+  owner: PendingOwner,
+  locationId: string | null,
+  name: string | null,
+): Pending => ({
   id: `draft_${crypto.randomUUID()}`,
   body,
+  owner,
   ghlLocationId: locationId,
   ghlLocationName: name,
   done: false,
@@ -50,27 +64,37 @@ function apply(current: Pending[], edit: Edit): Pending[] {
   )
 }
 
+/** Un año: la pestaña se recuerda hasta que alguien abra otra. */
+const rememberOwner = (owner: PendingOwner) => {
+  document.cookie = `${OWNER_COOKIE}=${owner}; path=/; max-age=31536000; samesite=lax`
+}
+
 const cuenta = (n: number, uno: string, varios: string) =>
   `${n} ${n === 1 ? uno : varios}`
 
 /**
- * Los pendientes, agrupados por subcuenta. Se agrupan aquí y no en el
- * servidor para que marcar uno lo mande al pie de su grupo en el acto,
- * sin esperar el viaje de ida y vuelta.
+ * Los pendientes de una persona, agrupados por subcuenta. Se agrupan aquí y
+ * no en el servidor para que marcar uno lo mande al pie de su grupo en el
+ * acto, sin esperar el viaje de ida y vuelta. Cada persona tiene su pestaña,
+ * y lo que se escribe entra en la pestaña abierta.
  */
 export function PendingList({
   pendings,
+  initialOwner,
   locations,
   locationsError,
 }: {
   pendings: Pending[]
+  initialOwner: PendingOwner
   locations: LocationOption[]
   locationsError: string | null
 }) {
   const [, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [showDone, setShowDone] = useState(false)
-  const [list, edit] = useOptimistic(pendings, apply)
+  const [owner, setOwner] = useState(initialOwner)
+  const [all, edit] = useOptimistic(pendings, apply)
+  const list = all.filter((p) => p.owner === owner)
 
   const names = useMemo(
     () => new Map(locations.map((l) => [l.id, l.name])),
@@ -89,71 +113,99 @@ export function PendingList({
     })
 
   const add = (body: string, locationId: string | null, name: string | null) =>
-    run({ type: "add", pending: draft(body, locationId, name) }, () =>
-      createPending({ body, locationId }),
+    run({ type: "add", pending: draft(body, owner, locationId, name) }, () =>
+      createPending({ body, owner, locationId }),
     )
 
   return (
-    <Instrument
-      label="Pendientes"
-      hint={`${cuenta(open, "abierto", "abiertos")} · ${cuenta(
-        groups.filter((g) => g.open.length > 0).length,
-        "subcuenta",
-        "subcuentas",
-      )} · ${cuenta(done, "hecho", "hechos")}`}
-      action={
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-          <Switch
-            size="sm"
-            checked={showDone}
-            onCheckedChange={setShowDone}
-            disabled={done === 0}
-          />
-          Ver hechos
-        </label>
-      }
+    <Tabs
+      value={owner}
+      onValueChange={(value) => {
+        if (!isPendingOwner(value)) return
+        setOwner(value)
+        setError(null)
+        rememberOwner(value)
+      }}
     >
-      <NewPending
-        locations={locations}
-        locationsError={locationsError}
-        onAdd={add}
-      />
+      <TabsList
+        variant="line"
+        aria-label="De quién son los pendientes"
+        className="w-full justify-start overflow-x-auto border-b border-border pb-1"
+      >
+        {PENDING_OWNERS.map((o) => {
+          const n = all.filter((p) => p.owner === o.id && !p.done).length
+          return (
+            <TabsTrigger key={o.id} value={o.id} className="flex-none px-2">
+              {o.name}
+              <span className="num text-xs text-muted-foreground">{n}</span>
+            </TabsTrigger>
+          )
+        })}
+      </TabsList>
 
-      {error && (
-        <p role="alert" className="border-b border-border px-4 py-2 text-xs text-status-risk">
-          {error}
-        </p>
-      )}
+      <TabsContent value={owner}>
+        <Instrument
+          label={`Pendientes de ${ownerName(owner)}`}
+          hint={`${cuenta(open, "abierto", "abiertos")} · ${cuenta(
+            groups.filter((g) => g.open.length > 0).length,
+            "subcuenta",
+            "subcuentas",
+          )} · ${cuenta(done, "hecho", "hechos")}`}
+          action={
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <Switch
+                size="sm"
+                checked={showDone}
+                onCheckedChange={setShowDone}
+                disabled={done === 0}
+              />
+              Ver hechos
+            </label>
+          }
+        >
+          <NewPending
+            locations={locations}
+            locationsError={locationsError}
+            onAdd={add}
+          />
 
-      {shown.length === 0 ? (
-        <EmptyState title={done > 0 ? "Nada pendiente" : "Sin pendientes"}>
-          {done > 0
-            ? "Todo lo escrito está hecho. Enciende “Ver hechos” para repasarlo."
-            : "Escribe el primero arriba. Una frase basta."}
-        </EmptyState>
-      ) : (
-        <div className="divide-y divide-border">
-          {shown.map((group) => (
-            <Group
-              key={group.locationId ?? SIN_SUBCUENTA}
-              group={group}
-              showDone={showDone}
-              onAdd={(body) =>
-                add(body, group.locationId, group.locationId ? group.name : null)
-              }
-              onToggle={(id, value) =>
-                run({ type: "toggle", id, done: value }, () =>
-                  togglePending(id, value),
-                )
-              }
-              onDelete={(id) =>
-                run({ type: "delete", id }, () => deletePending(id))
-              }
-            />
-          ))}
-        </div>
-      )}
-    </Instrument>
+          {error && (
+            <p role="alert" className="border-b border-border px-4 py-2 text-xs text-status-risk">
+              {error}
+            </p>
+          )}
+
+          {shown.length === 0 ? (
+            <EmptyState title={done > 0 ? "Nada pendiente" : "Sin pendientes"}>
+              {done > 0
+                ? "Todo lo escrito está hecho. Enciende “Ver hechos” para repasarlo."
+                : "Escribe el primero arriba. Una frase basta."}
+            </EmptyState>
+          ) : (
+            <div className="divide-y divide-border">
+              {shown.map((group) => (
+                <Group
+                  key={group.locationId ?? SIN_SUBCUENTA}
+                  group={group}
+                  showDone={showDone}
+                  onAdd={(body) =>
+                    add(body, group.locationId, group.locationId ? group.name : null)
+                  }
+                  onToggle={(id, value) =>
+                    run({ type: "toggle", id, done: value }, () =>
+                      togglePending(id, value),
+                    )
+                  }
+                  onDelete={(id) =>
+                    run({ type: "delete", id }, () => deletePending(id))
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </Instrument>
+      </TabsContent>
+    </Tabs>
   )
 }
 

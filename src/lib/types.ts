@@ -1,6 +1,7 @@
 /** Domain model for the Lezgo Suite control panel. */
 
 import type { PlanLine } from "@/lib/clients/account"
+import type { PendingOwner } from "@/lib/pendings/owners"
 
 /**
  * `excluded` es un enlace que alguien quitó a mano: la fila se queda para
@@ -210,12 +211,14 @@ export type Implementation = ImplementationRow & {
 }
 
 /**
- * Un pendiente: una frase y, si viene al caso, de qué subcuenta es. Lo que
- * necesita fecha, responsable o checklist es una implementación, no esto.
+ * Un pendiente: una frase, de quién es y, si viene al caso, de qué subcuenta.
+ * Lo que necesita fecha o checklist es una implementación, no esto.
  */
 export type Pending = {
   id: string
   body: string
+  /** De quién es: cada persona del equipo tiene su pestaña. */
+  owner: PendingOwner
   /** `null` a propósito: un pendiente puede no ser de ninguna subcuenta. */
   ghlLocationId: string | null
   /** Nombre al escribirlo; sirve de respaldo cuando GHL no contesta. */

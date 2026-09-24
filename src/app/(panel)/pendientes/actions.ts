@@ -4,6 +4,7 @@ import { refresh } from "next/cache"
 import { eq } from "drizzle-orm"
 
 import { db, schema } from "@/db"
+import { isPendingOwner, type PendingOwner } from "@/lib/pendings/owners"
 import { listLocationOptions } from "@/lib/repository"
 
 type Done = { ok: true } | { ok: false; error: string }
@@ -21,9 +22,13 @@ const MAX = 280
  */
 export async function createPending(input: {
   body: string
+  owner: PendingOwner
   locationId: string | null
 }): Promise<Done> {
   if (!db) return { ok: false, error: NO_DB }
+  if (!isPendingOwner(input.owner)) {
+    return { ok: false, error: "Esa persona no está en el equipo." }
+  }
 
   const body = input.body.trim().replace(/\s+/g, " ")
   if (!body) return { ok: false, error: "Escribe el pendiente." }
@@ -45,6 +50,7 @@ export async function createPending(input: {
   await db.insert(schema.pendings).values({
     id: `pd_${crypto.randomUUID()}`,
     body,
+    owner: input.owner,
     ghlLocationId,
     ghlLocationName,
   })

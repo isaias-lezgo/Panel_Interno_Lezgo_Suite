@@ -7,6 +7,11 @@ import { settingGroups, type SettingValues } from "@/data/lezgo-ia"
 import { dueStatus } from "@/lib/implementations/due"
 import { groupPendings } from "@/lib/pendings/group"
 import {
+  ownerName,
+  PENDING_OWNERS,
+  type PendingOwner,
+} from "@/lib/pendings/owners"
+import {
   getBillingFeed,
   getClientDetail,
   getLezgoIaData,
@@ -282,7 +287,12 @@ export const panelTools = {
           .map((i) => implementationSummary(i, false)),
         openPendings: pendings
           .filter((p) => !p.done && p.ghlLocationId && locationIds.has(p.ghlLocationId))
-          .map((p) => ({ body: p.body, subaccount: p.ghlLocationName, createdAt: p.createdAt })),
+          .map((p) => ({
+            body: p.body,
+            owner: ownerName(p.owner),
+            subaccount: p.ghlLocationName,
+            createdAt: p.createdAt,
+          })),
         invoices: billing.invoices
           .filter((i) => i.clientId === row.id)
           .map((i) => ({
@@ -409,19 +419,24 @@ export const panelTools = {
 
   listPendings: tool({
     description:
-      "Quick to-dos grouped by GHL sub-account (oldest open first). A pending is one sentence, optionally tied to a sub-account; no date, owner or priority.",
+      "Quick to-dos grouped by GHL sub-account (oldest open first). A pending is one sentence, belongs to one team member (Juan Carlos, Isaías Rios or Ivan Salazar) and is optionally tied to a sub-account; no date or priority.",
     inputSchema: z.object({
+      owner: z
+        .enum(PENDING_OWNERS.map((o) => o.id) as [PendingOwner, ...PendingOwner[]])
+        .optional()
+        .describe("Only this team member's pendings."),
       subaccount: z
         .string()
         .optional()
         .describe("Sub-account id or part of its name."),
       includeDone: z.boolean().optional(),
     }),
-    execute: async ({ subaccount, includeDone }) => {
-      const [rows, { options }] = await Promise.all([
+    execute: async ({ owner, subaccount, includeDone }) => {
+      const [all, { options }] = await Promise.all([
         listPendings(),
         listLocationOptions(),
       ])
+      const rows = owner ? all.filter((p) => p.owner === owner) : all
       const names = new Map(options.map((l) => [l.id, l.name]))
       const q = subaccount ? plano(subaccount) : null
       return groupPendings(rows, names)
@@ -432,9 +447,17 @@ export const panelTools = {
         .map((g) => ({
           subaccountId: g.locationId,
           subaccount: g.name,
-          open: g.open.map((p) => ({ body: p.body, createdAt: p.createdAt })),
+          open: g.open.map((p) => ({
+            body: p.body,
+            owner: ownerName(p.owner),
+            createdAt: p.createdAt,
+          })),
           done: includeDone
-            ? g.done.map((p) => ({ body: p.body, doneAt: p.doneAt }))
+            ? g.done.map((p) => ({
+                body: p.body,
+                owner: ownerName(p.owner),
+                doneAt: p.doneAt,
+              }))
             : g.done.length,
         }))
         .filter((g) => g.open.length > 0 || includeDone)

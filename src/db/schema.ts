@@ -157,10 +157,12 @@ export const implementationContacts = pgTable(
  * `ghl_location_name` es la foto del nombre al escribirlo, como en
  * `implementations`, para que la lista se lea aunque GHL no conteste.
  * Marcar hecho no borra: `done_at` ordena los tachados al pie del grupo.
+ * `owner` es la pestaña en la que vive (`src/lib/pendings/owners.ts`).
  */
 export const pendings = pgTable("pendings", {
   id: text("id").primaryKey(),
   body: text("body").notNull(),
+  owner: text("owner").notNull().default("isaias"),
   ghlLocationId: text("ghl_location_id"),
   ghlLocationName: text("ghl_location_name"),
   done: boolean("done").notNull().default(false),

@@ -5,6 +5,7 @@ import type { Pending } from "@/lib/types"
 
 const pending = (p: Partial<Pending> & { id: string }): Pending => ({
   body: p.id,
+  owner: "isaias",
   ghlLocationId: null,
   ghlLocationName: null,
   done: false,
