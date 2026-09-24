@@ -1100,4 +1100,6 @@ export type LezgoIaData = {
   actions: GhlAction[]
   /** Subcuentas enlazadas que GHL no devolvió. */
   failed: number
+  /** Subcuentas enlazadas que GHL tiene desactivadas: no fallan, no existen para la IA. */
+  inactive: string[]
 }

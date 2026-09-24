@@ -7,7 +7,13 @@ import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
 import * as lezgoIaDemo from "@/data/lezgo-ia"
 import { actions as lezgoIaDemoActions } from "@/data/lezgo-ia-ops"
-import { GhlClient, ghl, type GhlContact, type GhlUser } from "@/lib/ghl/client"
+import {
+  GhlClient,
+  GhlError,
+  ghl,
+  type GhlContact,
+  type GhlUser,
+} from "@/lib/ghl/client"
 import { locationToken, oauthConfigured } from "@/lib/ghl/oauth"
 import {
   LEZGO_SUITE_LOCATION_ID,
@@ -846,6 +852,7 @@ const cachedLezgoIaAccounts = unstable_cache(
     const all = await ghl.listAllLocations()
     const byId = new Map(all.map((l) => [l.id, l]))
     let failed = 0
+    const inactive: string[] = []
     const subaccounts = await Promise.all(
       links.map(async ({ locationId, clientName }) => {
         const location = byId.get(locationId)
@@ -870,6 +877,12 @@ const cachedLezgoIaAccounts = unstable_cache(
             ...live,
           })
         } catch (error) {
+          // Una subcuenta suspendida o cancelada en GHL no es una falla: se
+          // declara por nombre y no ensucia la consola.
+          if (isInactiveLocation(error)) {
+            inactive.push(location.name ?? clientName ?? locationId)
+            return null
+          }
           console.error(`GHL no devolvió usuarios de ${locationId}`, error)
           failed++
           return null
@@ -881,11 +894,17 @@ const cachedLezgoIaAccounts = unstable_cache(
         .filter((s) => s !== null)
         .sort((a, b) => a.name.localeCompare(b.name, "es")),
       failed,
+      inactive: inactive.sort((a, b) => a.localeCompare(b, "es")),
     }
   },
-  ["lezgo-ia-accounts-v3"],
+  ["lezgo-ia-accounts-v4"],
   { revalidate: 3600, tags: ["ghl-locations", "lezgo-ia"] },
 )
+
+/** GHL responde "The location is not active" a una subcuenta desactivada. */
+function isInactiveLocation(error: unknown) {
+  return error instanceof GhlError && /location is not active/i.test(error.message)
+}
 
 /**
  * Lo que solo la app OAuth puede leer de una subcuenta: sus pipelines y
@@ -937,6 +956,7 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
     threads: lezgoIaDemo.threads,
     actions: lezgoIaDemoActions,
     failed: 0,
+    inactive: [],
   }
   if (!ghl.isConfigured || !db) return demoData
 
@@ -955,7 +975,8 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
     .sort((a, b) => a.locationId.localeCompare(b.locationId))
 
   try {
-    const { subaccounts, failed } = await cachedLezgoIaAccounts(input)
+    const { subaccounts, failed, inactive } =
+      await cachedLezgoIaAccounts(input)
     // La configuración no pasa por la caché de GHL: lo guardado se ve al instante.
     const configs = await getLezgoIaConfigs(
       subaccounts.map((s) => ({ locationId: s.id, timezone: s.timezone })),
@@ -967,6 +988,7 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
       threads: [],
       actions: [],
       failed,
+      inactive,
     }
   } catch (error) {
     console.error("GHL no respondió para Lezgo IA", error)

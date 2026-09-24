@@ -38,6 +38,12 @@ export default async function LezgoIaPage({
             aparecen abajo.
           </p>
         )}
+        {data.inactive.length > 0 && (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Desactivadas en GoHighLevel, no aparecen abajo:{" "}
+            {data.inactive.join(", ")}.
+          </p>
+        )}
         <LezgoIaView
           initialTab={parseLezgoIaTab(tab)}
           initialAccount={cuenta}

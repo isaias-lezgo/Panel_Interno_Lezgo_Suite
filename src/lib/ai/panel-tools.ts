@@ -554,6 +554,7 @@ export const panelTools = {
       const meta = {
         source: data.source,
         failedSubaccounts: data.failed,
+        inactiveSubaccounts: data.inactive,
         note:
           data.source === "demo"
             ? "Datos de ejemplo: GHL o Neon no están conectados."
