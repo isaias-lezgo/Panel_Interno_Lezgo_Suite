@@ -1,12 +1,16 @@
 import Image from "next/image"
 import Link from "next/link"
+import { LogOut } from "lucide-react"
+
+import { logout } from "@/app/entrar/actions"
 
 import { LinkButton } from "@/components/panel/link-button"
 import { CommandMenu } from "@/components/shell/command-menu"
 import { ThemeToggle } from "@/components/shell/theme-toggle"
+import { Button } from "@/components/ui/button"
 import type { Client } from "@/lib/types"
 
-export function TopBar({ clients }: { clients: Client[] }) {
+export function TopBar({ clients, locked }: { clients: Client[]; locked: boolean }) {
   return (
     // `dark` fija los tokens oscuros en la barra, sea cual sea el tema.
     <header className="dark sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-brand-plate px-4 text-foreground md:px-6">
@@ -32,6 +36,14 @@ export function TopBar({ clients }: { clients: Client[] }) {
       </LinkButton>
 
       <ThemeToggle />
+
+      {locked ? (
+        <form action={logout}>
+          <Button type="submit" variant="ghost" size="icon" aria-label="Cerrar sesión" title="Cerrar sesión">
+            <LogOut />
+          </Button>
+        </form>
+      ) : null}
     </header>
   )
 }
