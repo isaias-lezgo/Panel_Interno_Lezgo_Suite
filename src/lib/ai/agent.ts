@@ -4,6 +4,7 @@ import { anthropic } from "@ai-sdk/anthropic"
 import { InferAgentUIMessage, ToolLoopAgent, stepCountIs } from "ai"
 
 import { copilotTools } from "@/lib/ai/tools"
+import { TIME_ZONE } from "@/lib/time"
 
 /**
  * Se puede cambiar sin tocar código con COPILOT_MODEL en .env.local.
@@ -62,7 +63,7 @@ Lezgo Suite revende GoHighLevel (GHL) en marca blanca: CRM y automatización. El
 function runtimeContext() {
   const now = new Date()
   const today = now.toLocaleDateString("es-MX", {
-    timeZone: "America/Mexico_City",
+    timeZone: TIME_ZONE,
     weekday: "long",
     year: "numeric",
     month: "long",

@@ -14,6 +14,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command"
+import { startNavigation } from "@/components/shell/navigation-progress"
 import { Button } from "@/components/ui/button"
 import { flatNav } from "@/lib/nav"
 import type { Client } from "@/lib/types"
@@ -35,6 +36,7 @@ export function CommandMenu({ clients }: { clients: Client[] }) {
 
   const go = (href: string) => {
     setOpen(false)
+    startNavigation()
     router.push(href)
   }
 

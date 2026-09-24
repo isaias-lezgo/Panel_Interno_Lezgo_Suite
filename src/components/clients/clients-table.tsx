@@ -31,6 +31,7 @@ import {
   type ColumnFilters,
 } from "@/lib/clients/filters"
 import { money, shortDate } from "@/lib/format"
+import { daysUntil } from "@/lib/implementations/due"
 import type { ClientRow, Currency } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -69,11 +70,8 @@ const sortLabel: Record<SortKey, string> = {
 /** Las columnas de número y de fecha se alinean a la derecha. */
 const alignRight: Partial<Record<ColumnKey, boolean>> = { mrr: true }
 
-const enTreintaDias = (iso: string | null) => {
-  if (!iso) return false
-  const dias = (Date.parse(iso) - Date.now()) / 86_400_000
-  return dias <= 30
-}
+const enTreintaDias = (iso: string | null) =>
+  iso !== null && daysUntil(iso) <= 30
 
 export function ClientsTable({
   clients,

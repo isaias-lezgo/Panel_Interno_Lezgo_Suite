@@ -4,7 +4,7 @@ import { tool } from "ai"
 import { z } from "zod"
 
 import { settingGroups, type SettingValues } from "@/data/lezgo-ia"
-import { dueStatus } from "@/lib/implementations/due"
+import { daysUntil, dueStatus } from "@/lib/implementations/due"
 import { groupPendings } from "@/lib/pendings/group"
 import {
   ownerName,
@@ -411,7 +411,7 @@ export const panelTools = {
             (limit === undefined ||
               (i.dueAt !== null &&
                 i.stage !== "live" &&
-                Date.parse(i.dueAt) - Date.now() <= limit * 86_400_000)),
+                daysUntil(i.dueAt) <= limit)),
         )
         .map((i) => implementationSummary(i, false))
     },

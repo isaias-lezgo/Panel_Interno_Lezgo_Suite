@@ -1,5 +1,8 @@
+import { Suspense } from "react"
+
 import { AppRail } from "@/components/shell/app-rail"
 import { MobileNav } from "@/components/shell/mobile-nav"
+import { NavigationProgress } from "@/components/shell/navigation-progress"
 import { TopBar } from "@/components/shell/top-bar"
 import { ghl } from "@/lib/ghl/client"
 import { listClients } from "@/lib/repository"
@@ -19,6 +22,9 @@ export default async function PanelLayout({
 
   return (
     <div className="flex min-h-dvh bg-background">
+      <Suspense>
+        <NavigationProgress />
+      </Suspense>
       <AppRail ghlConnected={ghl.isConfigured} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar clients={clients} locked={Boolean(process.env.PANEL_PASSWORD)} />

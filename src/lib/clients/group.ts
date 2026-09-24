@@ -1,4 +1,5 @@
 import { normalizeEmail, phoneKey } from "./match"
+import { mexicoDay } from "@/lib/time"
 
 /** La oportunidad tal como la devuelve `GET /opportunities/search`, recortada. */
 export type WonOpportunity = {
@@ -48,8 +49,9 @@ export function slugify(s: string) {
     .replace(/^-+|-+$/g, "")
 }
 
+/** El día en que se ganó, en GMT-6: GHL entrega el instante en UTC. */
 const wonDate = (o: WonOpportunity) =>
-  (o.lastStatusChangeAt ?? o.createdAt).slice(0, 10)
+  mexicoDay(o.lastStatusChangeAt ?? o.createdAt)
 
 function clean(s: string | null | undefined) {
   const t = s?.trim()

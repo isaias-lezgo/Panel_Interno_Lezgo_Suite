@@ -1,3 +1,5 @@
+import { daysBetween, mexicoDay } from "@/lib/time"
+
 /**
  * Semáforo de la fecha máxima de una implementación. Los días se cuentan
  * contra el día de hoy en México, no en la zona del servidor: si no, el
@@ -5,15 +7,8 @@
  */
 export type DueTone = "risk" | "warn" | "live" | "build"
 
-/** Hoy en México, `YYYY-MM-DD`. */
-export function todayInMexico(now = new Date()) {
-  return now.toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" })
-}
-
 export function daysUntil(dueAt: string, now = new Date()) {
-  return Math.round(
-    (Date.parse(dueAt) - Date.parse(todayInMexico(now))) / 86_400_000,
-  )
+  return daysBetween(mexicoDay(now), mexicoDay(dueAt))
 }
 
 /** Dos días o menos (o vencida) en rojo, hasta siete en amarillo, más en verde. Sin fecha, azul. */

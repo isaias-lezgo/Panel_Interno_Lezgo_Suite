@@ -1,3 +1,4 @@
+import { daysBetween, formatInMexico, mexicoDay } from "@/lib/time"
 import type { Currency } from "@/lib/types"
 
 const LOCALE = "es-MX"
@@ -68,71 +69,41 @@ export const compactMoney = (cents: number) => {
 export const percent = (n: number, digits = 0) =>
   `${n > 0 ? "+" : ""}${n.toFixed(digits).replace(".", ",")}%`
 
-/**
- * `new Date("2026-08-01")` se interpreta como medianoche UTC, así que en
- * América se dibuja como el día anterior. Las fechas sin hora se construyen
- * en la zona local para que la tabla muestre el día que realmente es.
+/*
+ * Todas las fechas se dibujan en GMT-6 (ver `@/lib/time`): un día sin hora
+ * se queda en ese día, y un instante se convierte a la hora de México. Así el
+ * HTML del servidor (UTC) y el navegador dicen lo mismo.
  */
-export function toDate(iso: string) {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  if (!dateOnly) return new Date(iso)
-  const [, year, month, day] = dateOnly
-  return new Date(Number(year), Number(month) - 1, Number(day))
-}
 
 export function shortDate(iso: string) {
-  return toDate(iso).toLocaleDateString(LOCALE, {
-    day: "numeric",
-    month: "short",
-  })
+  return formatInMexico(iso, LOCALE, { day: "numeric", month: "short" })
 }
 
-/**
- * Fecha de un instante (timestamp con zona), fijada a la hora de México: el
- * servidor corre en UTC y sin zona fija el día cambiaría entre el HTML y el
- * navegador en las horas cerca de medianoche.
- */
 export function stampDate(iso: string) {
-  return new Date(iso).toLocaleDateString(LOCALE, {
+  return formatInMexico(iso, LOCALE, {
     day: "numeric",
     month: "short",
     year: "numeric",
-    timeZone: "America/Mexico_City",
   })
 }
 
-/** Día y hora de un instante, en hora de México (ver `stampDate`). */
+/** Día y hora de un instante, en hora de México. */
 export function stampDateTime(iso: string) {
-  return new Date(iso).toLocaleString(LOCALE, {
+  return formatInMexico(iso, LOCALE, {
     day: "numeric",
     month: "short",
     hour: "numeric",
     minute: "2-digit",
-    timeZone: "America/Mexico_City",
   })
 }
 
 export function fullDate(iso: string) {
-  return toDate(iso).toLocaleDateString(LOCALE, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
+  return stampDate(iso)
 }
 
 /** "hace 3 d" / "en 12 d". Se lee más rápido que una fecha en una tabla densa. */
 export function relativeDays(iso: string, now = new Date()) {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const target = toDate(iso)
-  const days = Math.round(
-    (new Date(
-      target.getFullYear(),
-      target.getMonth(),
-      target.getDate(),
-    ).getTime() -
-      start.getTime()) /
-      86_400_000,
-  )
+  const days = daysBetween(mexicoDay(now), mexicoDay(iso))
   if (days === 0) return "hoy"
   if (days === 1) return "mañana"
   if (days === -1) return "ayer"

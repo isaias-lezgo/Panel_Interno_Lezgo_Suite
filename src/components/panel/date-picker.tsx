@@ -10,7 +10,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { fullDate } from "@/lib/format"
-import { todayInMexico } from "@/lib/implementations/due"
+import { mexicoDay } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
 /*
@@ -100,7 +100,7 @@ export function DatePicker({
   label?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [today, setToday] = useState(() => todayInMexico())
+  const [today, setToday] = useState(() => mexicoDay())
   const [cursor, setCursor] = useState(value ?? today)
   const grid = useRef<HTMLDivElement>(null)
   // Solo se enfoca el día tras moverse con el teclado, no al pasar de mes
@@ -146,7 +146,7 @@ export function DatePicker({
       open={open}
       onOpenChange={(next) => {
         if (next) {
-          const now = todayInMexico()
+          const now = mexicoDay()
           setToday(now)
           setCursor(value ?? now)
         }

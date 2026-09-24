@@ -1,3 +1,4 @@
+import { mexicoMonth } from "@/lib/time"
 import type { Invoice } from "@/lib/types"
 
 /**
@@ -40,12 +41,13 @@ function label(key: string) {
   return new Date(y, m - 1, 1).toLocaleDateString(LOCALE, { month: "short" })
 }
 
-/** Las `months` claves "YYYY-MM" que terminan en el mes de `now`. */
+/** Las `months` claves "YYYY-MM" que terminan en el mes de `now` en GMT-6. */
 export function monthKeys(now: Date, months: number) {
+  const [y, m] = mexicoMonth(now).split("-").map(Number)
   const out: string[] = []
   for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`)
+    const d = new Date(Date.UTC(y, m - 1 - i, 1))
+    out.push(d.toISOString().slice(0, 7))
   }
   return out
 }

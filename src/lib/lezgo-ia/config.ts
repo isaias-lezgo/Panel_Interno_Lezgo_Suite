@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { TIME_ZONE } from "@/lib/time"
+
 import {
   baseSettings,
   settingGroups,
@@ -54,7 +56,7 @@ export type AccountConfig = {
 
 export function defaultAccountConfig(
   locationId: string,
-  timezone = "America/Mexico_City",
+  timezone = TIME_ZONE,
 ): AccountConfig {
   return {
     locationId,

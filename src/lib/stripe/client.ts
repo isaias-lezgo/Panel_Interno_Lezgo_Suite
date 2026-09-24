@@ -10,6 +10,7 @@ import {
   type PayingCustomer,
   type PayingSource,
 } from "./paying"
+import { dayFromEpoch } from "@/lib/time"
 
 /**
  * Única superficie hacia Stripe, con el mismo papel que `ghl/client.ts` tiene
@@ -204,10 +205,7 @@ async function productNames(): Promise<Map<string, string>> {
 }
 
 /** Día en hora de México: el periodo termina a una hora, no en UTC. */
-const diaDe = (epoch: number) =>
-  new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Mexico_City",
-  }).format(new Date(epoch * 1000))
+const diaDe = dayFromEpoch
 
 export type CustomerSubs = {
   /** Lo que vale al mes, por moneda: de aquí sale el MRR. */

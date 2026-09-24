@@ -16,6 +16,7 @@ import {
   searchLezgoContacts,
 } from "@/lib/repository"
 import type { ImplementationContact, ImplementationStage } from "@/lib/types"
+import { mexicoDay } from "@/lib/time"
 
 type Result = { ok: true; id: string } | { ok: false; error: string }
 type Done = { ok: true } | { ok: false; error: string }
@@ -78,7 +79,7 @@ export async function createImplementation(input: {
     null
 
   const id = `im_${crypto.randomUUID()}`
-  const today = new Date().toISOString().slice(0, 10)
+  const today = mexicoDay()
 
   await db.batch([
     db.insert(schema.implementations).values({
@@ -117,7 +118,7 @@ export async function moveImplementation(
 
   const [row] = await db
     .update(schema.implementations)
-    .set({ stage, updatedAt: new Date().toISOString().slice(0, 10) })
+    .set({ stage, updatedAt: mexicoDay() })
     .where(eq(schema.implementations.id, id))
     .returning({ id: schema.implementations.id })
   if (!row) return { ok: false, error: "Esa implementación ya no existe." }
@@ -138,7 +139,7 @@ export async function renameImplementation(
   }
   const [row] = await db
     .update(schema.implementations)
-    .set({ name: clean, updatedAt: new Date().toISOString().slice(0, 10) })
+    .set({ name: clean, updatedAt: mexicoDay() })
     .where(eq(schema.implementations.id, id))
     .returning({ id: schema.implementations.id })
   if (!row) return { ok: false, error: "Esa implementación ya no existe." }
@@ -160,7 +161,7 @@ export async function setImplementationDueDate(
   }
   const [row] = await db
     .update(schema.implementations)
-    .set({ dueAt, updatedAt: new Date().toISOString().slice(0, 10) })
+    .set({ dueAt, updatedAt: mexicoDay() })
     .where(eq(schema.implementations.id, id))
     .returning({ id: schema.implementations.id })
   if (!row) return { ok: false, error: "Esa implementación ya no existe." }
@@ -187,7 +188,7 @@ async function syncProgress(implementationId: string) {
     .update(schema.implementations)
     .set({
       progress: checklistProgress(rows),
-      updatedAt: new Date().toISOString().slice(0, 10),
+      updatedAt: mexicoDay(),
     })
     .where(eq(schema.implementations.id, implementationId))
 }

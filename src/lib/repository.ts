@@ -66,6 +66,7 @@ export type {
   LocationOption,
   StripeCustomerOption,
 } from "@/lib/types"
+import { dayFromEpoch } from "@/lib/time"
 
 /**
  * One read surface for the whole panel. Every page goes through here, so
@@ -735,10 +736,8 @@ const cachedSeries = unstable_cache(
           return v === null ? acc : (acc ?? 0) + v
         }, null)
         return {
-          createdAt: new Date(s.created * 1000).toISOString().slice(0, 10),
-          canceledAt: s.canceled_at
-            ? new Date(s.canceled_at * 1000).toISOString().slice(0, 10)
-            : null,
+          createdAt: dayFromEpoch(s.created),
+          canceledAt: s.canceled_at ? dayFromEpoch(s.canceled_at) : null,
           amountBase: amounts.length === 0 ? 0 : total,
         }
       })

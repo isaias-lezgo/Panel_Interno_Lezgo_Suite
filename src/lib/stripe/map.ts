@@ -1,11 +1,10 @@
 import type Stripe from "stripe"
 
 import type { Currency, Invoice, InvoiceStatus } from "@/lib/types"
+import { dayFromEpoch } from "@/lib/time"
 
-/** Stripe entrega segundos; el panel guarda fechas sin hora. */
-function isoDate(seconds: number) {
-  return new Date(seconds * 1000).toISOString().slice(0, 10)
-}
+/** Stripe entrega segundos; el panel guarda el día en GMT-6. */
+const isoDate = dayFromEpoch
 
 export function toCurrency(code: string): Currency | null {
   const c = code.toLowerCase()

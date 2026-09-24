@@ -87,12 +87,23 @@ src/
     ai/agent.ts         Definición del agente + aprobaciones
     ai/tools.ts         Herramientas de GHL del copiloto
     ai/panel-tools.ts   Lecturas del panel para el copiloto
+    time.ts             Zona horaria del panel (GMT-6): día, mes y formato
     format.ts nav.ts types.ts utils.ts
   db/                   Esquema Drizzle, conexión, reintento y seed
   data/                 Datos de ejemplo (demo.ts, lezgo-ia.ts)
 ```
 
 ## Reglas del proyecto
+
+**Hora.** Todo el panel vive en **GMT-6** (`America/Mexico_City`, que
+desde 2022 ya no cambia de horario). El servidor corre en UTC y el navegador
+en la zona de quien lo abre, así que ningún día, mes u hora sale de
+`toISOString().slice(0, 10)`, `getDate()` ni de `toLocale*` sin zona: pasadas
+las 6 pm esos ya dan el día de mañana. Usa `src/lib/time.ts` —`mexicoDay`,
+`mexicoMonth`, `dayFromEpoch`, `daysBetween`, `formatInMexico`— o los
+formatos de `src/lib/format.ts`, que ya lo usan. Los instantes se guardan
+completos (`toISOString()`), sin zona que convertir. Solo Lezgo IA respeta la
+zona de cada subcuenta de GHL, porque los horarios son los del cliente.
 
 **Datos.** Toda lectura pasa por `src/lib/repository.ts`. Ese archivo decide
 entre los datos de ejemplo y Neon según exista `DATABASE_URL`. No consultes la
@@ -317,7 +328,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 14 archivos: Stripe, clientes, filtros, entregas, pendientes, reintento y sesión
+pnpm test         # vitest, 15 archivos: Stripe, clientes, filtros, entregas, pendientes, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero

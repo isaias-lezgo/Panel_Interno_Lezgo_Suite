@@ -80,7 +80,7 @@ function dueBucket(iso: string | null, now: Date) {
 }
 
 function wonBucket(iso: string, now: Date) {
-  const ago = -daysUntil(iso.slice(0, 10), now)
+  const ago = -daysUntil(iso, now)
   if (ago <= 30) return "30"
   if (ago <= 90) return "90"
   if (ago <= 365) return "365"

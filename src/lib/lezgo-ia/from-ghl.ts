@@ -5,6 +5,7 @@ import {
   type Subaccount,
 } from "@/data/lezgo-ia"
 import type { GhlLocation, GhlPipeline, GhlUser } from "@/lib/ghl/client"
+import { TIME_ZONE } from "@/lib/time"
 
 /**
  * Traduce una subcuenta real de GHL al modelo de Lezgo IA. La IA todavía no
@@ -42,7 +43,7 @@ export function toSubaccount(input: {
     ghlLocationId: location.id,
     city: location.city?.trim() || "Sin ciudad",
     clientName,
-    timezone: location.timezone || "America/Mexico_City",
+    timezone: location.timezone || TIME_ZONE,
     status: "unset",
     activity: 0,
     weeklyMessages: 0,

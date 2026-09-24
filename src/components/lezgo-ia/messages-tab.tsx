@@ -25,6 +25,7 @@ import {
   type ThreadKind,
 } from "@/data/lezgo-ia"
 import { cn } from "@/lib/utils"
+import { daysBetween, mexicoDay } from "@/lib/time"
 
 type KindFilter = ThreadKind | "todos"
 
@@ -81,10 +82,9 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
       .filter((t) => kind === "todos" || t.kind === kind)
       .filter((t) => {
         if (range === "todo") return true
-        const cutoff = new Date(now)
-        cutoff.setHours(0, 0, 0, 0)
-        cutoff.setDate(cutoff.getDate() - (rangeDays[range] - 1))
-        return new Date(lastAt(t)) >= cutoff
+        // Días en GMT-6: "hoy" empieza a medianoche de México.
+        const ago = daysBetween(mexicoDay(lastAt(t)), mexicoDay(now))
+        return ago <= rangeDays[range] - 1
       })
       .filter((t) => {
         if (!q) return true

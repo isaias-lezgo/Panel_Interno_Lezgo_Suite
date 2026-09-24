@@ -6,9 +6,10 @@
  */
 
 import type { GhlAction } from "./lezgo-ia-ops"
+import { formatInMexico } from "@/lib/time"
 
 /** Instante fijo para que "hace 2 h" se vea igual en servidor y cliente. */
-export const DEMO_NOW = "2026-09-17T11:40"
+export const DEMO_NOW = "2026-09-17T11:40-06:00"
 
 export type AdvisorRole = "admin" | "user"
 
@@ -386,7 +387,7 @@ export const subaccounts: Subaccount[] = [
         role: "admin",
         activeLeads: 14,
         responseMinutes: 9,
-        lastActiveAt: "2026-09-17T11:22",
+        lastActiveAt: "2026-09-17T11:22-06:00",
         alerts: true,
       },
       {
@@ -396,7 +397,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 31,
         responseMinutes: 24,
-        lastActiveAt: "2026-09-17T10:58",
+        lastActiveAt: "2026-09-17T10:58-06:00",
         alerts: true,
       },
       {
@@ -406,7 +407,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 27,
         responseMinutes: 15,
-        lastActiveAt: "2026-09-17T11:31",
+        lastActiveAt: "2026-09-17T11:31-06:00",
         alerts: true,
       },
       {
@@ -416,7 +417,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 19,
         responseMinutes: 52,
-        lastActiveAt: "2026-09-16T19:04",
+        lastActiveAt: "2026-09-16T19:04-06:00",
         alerts: true,
         settings: {
           abandonedLead: { enabled: true, option: "24" },
@@ -431,7 +432,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 22,
         responseMinutes: 18,
-        lastActiveAt: "2026-09-17T09:47",
+        lastActiveAt: "2026-09-17T09:47-06:00",
         alerts: false,
         settings: {
           quietHours: { enabled: true, option: "22-07" },
@@ -445,7 +446,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 8,
         responseMinutes: 140,
-        lastActiveAt: "2026-09-14T17:20",
+        lastActiveAt: "2026-09-14T17:20-06:00",
         alerts: true,
         settings: {
           suggestLost: { enabled: true, option: "14" },
@@ -483,7 +484,7 @@ export const subaccounts: Subaccount[] = [
         role: "admin",
         activeLeads: 11,
         responseMinutes: 12,
-        lastActiveAt: "2026-09-17T11:05",
+        lastActiveAt: "2026-09-17T11:05-06:00",
         alerts: true,
       },
       {
@@ -493,7 +494,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 24,
         responseMinutes: 21,
-        lastActiveAt: "2026-09-17T10:12",
+        lastActiveAt: "2026-09-17T10:12-06:00",
         alerts: true,
       },
       {
@@ -503,7 +504,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 17,
         responseMinutes: 38,
-        lastActiveAt: "2026-09-16T16:40",
+        lastActiveAt: "2026-09-16T16:40-06:00",
         alerts: true,
         settings: {
           suggestLost: { enabled: true, option: "14" },
@@ -516,7 +517,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 13,
         responseMinutes: 27,
-        lastActiveAt: "2026-09-17T08:55",
+        lastActiveAt: "2026-09-17T08:55-06:00",
         alerts: false,
       },
     ],
@@ -549,7 +550,7 @@ export const subaccounts: Subaccount[] = [
         role: "admin",
         activeLeads: 6,
         responseMinutes: 45,
-        lastActiveAt: "2026-09-15T13:10",
+        lastActiveAt: "2026-09-15T13:10-06:00",
         alerts: true,
       },
       {
@@ -559,7 +560,7 @@ export const subaccounts: Subaccount[] = [
         role: "admin",
         activeLeads: 9,
         responseMinutes: 33,
-        lastActiveAt: "2026-09-16T11:48",
+        lastActiveAt: "2026-09-16T11:48-06:00",
         alerts: true,
       },
       {
@@ -569,7 +570,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 21,
         responseMinutes: 61,
-        lastActiveAt: "2026-09-16T18:22",
+        lastActiveAt: "2026-09-16T18:22-06:00",
         alerts: false,
       },
       {
@@ -579,7 +580,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 16,
         responseMinutes: 29,
-        lastActiveAt: "2026-09-17T09:30",
+        lastActiveAt: "2026-09-17T09:30-06:00",
         alerts: false,
       },
       {
@@ -589,7 +590,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 12,
         responseMinutes: 84,
-        lastActiveAt: "2026-09-13T10:05",
+        lastActiveAt: "2026-09-13T10:05-06:00",
         alerts: false,
       },
     ],
@@ -635,7 +636,7 @@ export const subaccounts: Subaccount[] = [
         role: "admin",
         activeLeads: 18,
         responseMinutes: 7,
-        lastActiveAt: "2026-09-17T11:36",
+        lastActiveAt: "2026-09-17T11:36-06:00",
         alerts: true,
       },
       {
@@ -645,7 +646,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 33,
         responseMinutes: 19,
-        lastActiveAt: "2026-09-17T11:10",
+        lastActiveAt: "2026-09-17T11:10-06:00",
         alerts: true,
       },
       {
@@ -655,7 +656,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 26,
         responseMinutes: 14,
-        lastActiveAt: "2026-09-17T10:44",
+        lastActiveAt: "2026-09-17T10:44-06:00",
         alerts: true,
       },
     ],
@@ -692,7 +693,7 @@ export const subaccounts: Subaccount[] = [
         role: "admin",
         activeLeads: 0,
         responseMinutes: 0,
-        lastActiveAt: "2026-09-12T12:00",
+        lastActiveAt: "2026-09-12T12:00-06:00",
         alerts: false,
       },
       {
@@ -702,7 +703,7 @@ export const subaccounts: Subaccount[] = [
         role: "user",
         activeLeads: 0,
         responseMinutes: 0,
-        lastActiveAt: "2026-09-12T12:00",
+        lastActiveAt: "2026-09-12T12:00-06:00",
         alerts: false,
       },
     ],
@@ -745,7 +746,7 @@ export const threads: Thread[] = [
       {
         id: "m-01",
         from: "ia",
-        at: "2026-09-17T11:18",
+        at: "2026-09-17T11:18-06:00",
         text: "Vi que Fernando Ibarra te dejó de contestar hace 2 días. Le mandaste la ficha del depto en Torre Nuevo Sur el lunes y abrió el enlace dos veces, pero no respondió. ¿Te creo una tarea para retomarlo hoy o lo mando a perdido?",
         actions: [
           { label: "Crear tarea para hoy" },
@@ -767,13 +768,13 @@ export const threads: Thread[] = [
       {
         id: "m-02",
         from: "advisor",
-        at: "2026-09-17T10:52",
+        at: "2026-09-17T10:52-06:00",
         text: "¿A qué hora abre la casa muestra de Cumbres? Lucía Medina quiere ir el sábado.",
       },
       {
         id: "m-03",
         from: "ia",
-        at: "2026-09-17T10:52",
+        at: "2026-09-17T10:52-06:00",
         text: "Según el calendario «Casa muestra Cumbres» del CRM: sábado y domingo de 10:00 a 18:00; entre semana solo con cita. ¿Te agendo a Lucía el sábado a las 11:00 en tu calendario?",
         actions: [
           { label: "Agendar sábado 11:00", chosen: true },
@@ -783,13 +784,13 @@ export const threads: Thread[] = [
       {
         id: "m-04",
         from: "advisor",
-        at: "2026-09-17T10:58",
+        at: "2026-09-17T10:58-06:00",
         text: "Agendar sábado 11:00",
       },
       {
         id: "m-04b",
         from: "ia",
-        at: "2026-09-17T10:58",
+        at: "2026-09-17T10:58-06:00",
         text: "Listo. Visita creada en tu calendario para el sábado 19 a las 11:00 con Lucía Medina. Te recuerdo 3 h antes; tú le confirmas a ella.",
       },
     ],
@@ -805,19 +806,19 @@ export const threads: Thread[] = [
       {
         id: "m-05",
         from: "ia",
-        at: "2026-09-17T11:00",
+        at: "2026-09-17T11:00-06:00",
         text: "Revisión de la última hora en Altavista:\n\n• 4 leads nuevos entraron por Facebook; 3 ya tienen primer contacto, el de Andrés Cantú lleva 40 min sin respuesta.\n• Rodrigo tiene 6 oportunidades en \"Visita agendada\" sin fecha en el calendario.\n• Lead caliente: Patricia Solís (Sofía) preguntó dos veces por crédito Infonavit y pidió cotización.\n\nNada más se movió desde las 10:00.",
       },
       {
         id: "m-06",
         from: "advisor",
-        at: "2026-09-17T11:04",
+        at: "2026-09-17T11:04-06:00",
         text: "Recuérdale a Andrés el lead nuevo y avísame si a las 12 sigue igual.",
       },
       {
         id: "m-07",
         from: "ia",
-        at: "2026-09-17T11:04",
+        at: "2026-09-17T11:04-06:00",
         text: "Le avisé a Andrés por WhatsApp. Te escribo a las 12:00 si el lead sigue sin respuesta.",
       },
     ],
@@ -834,7 +835,7 @@ export const threads: Thread[] = [
       {
         id: "m-08",
         from: "ia",
-        at: "2026-09-17T11:04",
+        at: "2026-09-17T11:04-06:00",
         text: "Te asignaron a Roberto Salinas hace 40 min y todavía no tiene primer contacto. Vino de la campaña de Cumbres y dejó su teléfono: +52 81 ··· 2210. ¿Lo tomas ahora o te creo una tarea para más tarde?",
         actions: [{ label: "Ya le escribo" }, { label: "Tarea para más tarde" }],
       },
@@ -851,13 +852,13 @@ export const threads: Thread[] = [
       {
         id: "m-09",
         from: "advisor",
-        at: "2026-09-17T09:41",
+        at: "2026-09-17T09:41-06:00",
         text: "¿Qué leads tengo sin cita esta semana?",
       },
       {
         id: "m-10",
         from: "ia",
-        at: "2026-09-17T09:41",
+        at: "2026-09-17T09:41-06:00",
         text: "Tienes 22 leads activos y 7 no tienen cita esta semana:\n\n1. Patricia Solís — preguntó por crédito ayer\n2. Miguel Ángel Ruiz — última respuesta hace 3 d\n3. Carolina Peña — sin respuesta desde el 12 sep\n4. Jesús Domínguez — pidió llamar después del 20\n5. Ana Laura Cepeda — nueva, contactada hoy\n6. Óscar Treviño — sin respuesta desde el 10 sep\n7. Renata Gil — quiere ver Cumbres, sin fecha\n\nPatricia y Renata son las más calientes. ¿Te creo tareas para llamarles hoy?",
         actions: [
           { label: "Sí, crea las tareas", chosen: true },
@@ -867,13 +868,13 @@ export const threads: Thread[] = [
       {
         id: "m-11",
         from: "advisor",
-        at: "2026-09-17T09:45",
+        at: "2026-09-17T09:45-06:00",
         text: "Sí, crea las tareas",
       },
       {
         id: "m-12",
         from: "ia",
-        at: "2026-09-17T09:46",
+        at: "2026-09-17T09:46-06:00",
         text: "Listo: dos tareas en GoHighLevel para hoy, «Llamar a Patricia Solís» y «Llamar a Renata Gil», con la ficha de Cumbres adjunta. Te las recuerdo a las 12:00 si siguen abiertas.",
       },
     ],
@@ -890,7 +891,7 @@ export const threads: Thread[] = [
       {
         id: "m-13",
         from: "ia",
-        at: "2026-09-17T08:30",
+        at: "2026-09-17T08:30-06:00",
         text: "Martín Aceves lleva 8 días sin contestar. Le mandaste dos seguimientos, el último el viernes, y ninguno tuvo respuesta. La regla del equipo es proponer perdido a los 7 días. ¿Lo muevo a \"Perdido\" con motivo \"Sin respuesta\"?",
         actions: [
           { label: "Mover a perdido" },
@@ -900,13 +901,13 @@ export const threads: Thread[] = [
       {
         id: "m-14",
         from: "advisor",
-        at: "2026-09-17T08:52",
+        at: "2026-09-17T08:52-06:00",
         text: "Dale una semana más, me dijo que regresaba de viaje el 20.",
       },
       {
         id: "m-15",
         from: "ia",
-        at: "2026-09-17T08:52",
+        at: "2026-09-17T08:52-06:00",
         text: "De acuerdo. Dejé una nota en el contacto con eso y te lo vuelvo a traer el 22 de septiembre si sigue sin responder.",
       },
     ],
@@ -922,7 +923,7 @@ export const threads: Thread[] = [
       {
         id: "m-16",
         from: "ia",
-        at: "2026-09-17T09:00",
+        at: "2026-09-17T09:00-06:00",
         text: "Buenos días, Ernesto. Casas del Valle al corte de las 9:00:\n\n• Leads nuevos ayer: 9 (6 Facebook, 2 portal, 1 referido). Todos con primer contacto.\n• Visitas hoy: 3 — Daniela 11:00 y 16:00, Jorge 13:00.\n• Sin movimiento más de 5 días: 11 oportunidades, 7 de Jorge.\n• Karla tiene los avisos apagados desde el lunes.\n\nEl tiempo de primera respuesta del equipo bajó a 24 min, 6 menos que la semana pasada.",
       },
     ],
@@ -939,19 +940,19 @@ export const threads: Thread[] = [
       {
         id: "m-17",
         from: "advisor",
-        at: "2026-09-16T22:10",
+        at: "2026-09-16T22:10-06:00",
         text: "¿El depto de Zibatá acepta crédito Fovissste? Rocío Bravo me está preguntando.",
       },
       {
         id: "m-17b",
         from: "ia",
-        at: "2026-09-16T22:10",
+        at: "2026-09-16T22:10-06:00",
         text: "La ficha de Zibatá en el CRM no dice qué créditos acepta; el campo está vacío. No se lo confirme todavía. Le dejé una nota al contacto y le avisé a Ernesto para que complete la ficha.",
       },
       {
         id: "m-18",
         from: "advisor",
-        at: "2026-09-17T09:02",
+        at: "2026-09-17T09:02-06:00",
         text: "Gracias, lo confirmo con Ernesto.",
       },
     ],
@@ -968,7 +969,7 @@ export const threads: Thread[] = [
       {
         id: "m-19",
         from: "ia",
-        at: "2026-09-17T11:27",
+        at: "2026-09-17T11:27-06:00",
         text: "Thomas Reed contestó en menos de 2 min tres veces seguidas, preguntó por el plan de pagos de preventa y si puede cerrar desde Estados Unidos. Está listo para una llamada. ¿Te bloqueo hoy a las 13:00 o a las 17:00 (hora de Tulum) para llamarle?",
         actions: [{ label: "Hoy 13:00" }, { label: "Hoy 17:00" }, { label: "Yo le llamo" }],
       },
@@ -985,13 +986,13 @@ export const threads: Thread[] = [
       {
         id: "m-20",
         from: "advisor",
-        at: "2026-09-17T10:20",
+        at: "2026-09-17T10:20-06:00",
         text: "¿Cuántas oportunidades cerró el equipo esta semana y de quién?",
       },
       {
         id: "m-21",
         from: "ia",
-        at: "2026-09-17T10:20",
+        at: "2026-09-17T10:20-06:00",
         text: "Del lunes 14 a hoy, Vive Riviera cerró 3 oportunidades como ganadas:\n\n• Sebastián — Condo Aldea Zamá 2B, apartado el martes\n• Valeria — Lote Bahía Príncipe, apartado el miércoles\n• Valeria — Condo Aldea Zamá 4A, apartado hoy a las 9:15\n\nHay 5 más en \"Negociación\" con fecha de cierre esta semana.",
       },
     ],
@@ -1008,7 +1009,7 @@ export const threads: Thread[] = [
       {
         id: "m-22",
         from: "ia",
-        at: "2026-09-17T11:00",
+        at: "2026-09-17T11:00-06:00",
         text: "En 3 horas tienes visita con Élodie Marchand en Bahía Príncipe, manzana 7. Ella no ha confirmado asistencia; te conviene escribirle. Lleva el plano actualizado: el de la ficha es del mes pasado.",
       },
     ],
@@ -1024,13 +1025,13 @@ export const threads: Thread[] = [
       {
         id: "m-23",
         from: "ia",
-        at: "2026-09-15T08:00",
+        at: "2026-09-15T08:00-06:00",
         text: "Corte de Torres & Asociados. 12 oportunidades llevan más de 10 días sin movimiento, 7 de Raúl. Solo dejo el análisis: los avisos a asesores están en pausa desde el 11 de septiembre y no mandé ningún mensaje.",
       },
       {
         id: "m-24",
         from: "advisor",
-        at: "2026-09-15T13:08",
+        at: "2026-09-15T13:08-06:00",
         text: "Sigue en pausa hasta que terminemos de limpiar el pipeline.",
       },
     ],
@@ -1084,11 +1085,9 @@ export function relativeTime(iso: string | null, now = DEMO_NOW) {
   return `hace ${days} d`
 }
 
+/** Hora del día, en GMT-6. */
 export function clockTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("es-MX", {
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatInMexico(iso, "es-MX", { hour: "2-digit", minute: "2-digit" })
 }
 
 /** Lo que la vista necesita, venga de GHL o del demo. */

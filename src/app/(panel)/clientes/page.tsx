@@ -5,6 +5,7 @@ import { syncClientsIfStale } from "@/lib/clients/sync"
 import { money } from "@/lib/format"
 import { lezgoSuiteEnabled } from "@/lib/ghl/lezgo-suite"
 import { baseCurrency, lastSyncAt, listClientRows } from "@/lib/repository"
+import { formatInMexico } from "@/lib/time"
 
 import { syncClients } from "./actions"
 
@@ -28,7 +29,7 @@ export default async function ClientesPage() {
     `${money(mrr, currency)} MRR`,
     `${unlinked} sin enlazar`,
     syncedAt
-      ? `sync ${new Date(syncedAt).toLocaleString("es-MX", {
+      ? `sync ${formatInMexico(syncedAt, "es-MX", {
           dateStyle: "short",
           timeStyle: "short",
         })}`

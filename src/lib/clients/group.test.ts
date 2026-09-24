@@ -68,7 +68,8 @@ describe("groupWonOpportunities", () => {
     expect(out[0].name).toBe("La Colada")
     expect(out[0].contactName).toBe("Ricardo Perez")
     expect(out[0].opportunities.map((o) => o.id)).toEqual(["o1", "o2"])
-    expect(out[0].wonAt).toBe("2026-03-01")
+    // Medianoche UTC del 1 de marzo son las 6 pm del 28 de febrero en GMT-6.
+    expect(out[0].wonAt).toBe("2026-02-28")
     expect(out[0].stage).toBe("Cliente Activo")
   })
 

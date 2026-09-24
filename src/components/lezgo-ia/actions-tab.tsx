@@ -23,6 +23,7 @@ import {
 } from "@/data/lezgo-ia-ops"
 import { fullDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { mexicoDay } from "@/lib/time"
 
 const kindFilterLabel: Record<string, string> = {
   todas: "Todas las acciones",
@@ -57,7 +58,7 @@ export function ActionsTab({ data }: { data: LezgoIaData }) {
   const byDay = useMemo(() => {
     const groups = new Map<string, GhlAction[]>()
     for (const a of filtered) {
-      const day = a.at.slice(0, 10)
+      const day = mexicoDay(a.at)
       groups.set(day, [...(groups.get(day) ?? []), a])
     }
     return [...groups.entries()]
