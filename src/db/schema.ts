@@ -172,6 +172,21 @@ export const pendings = pgTable("pendings", {
     .defaultNow(),
 })
 
+/**
+ * El orden de los grupos de subcuenta en la pestaña de cada persona, tal
+ * como lo dejó al arrastrarlos. Una subcuenta sin fila aquí va después de
+ * las ordenadas, por nombre; "Sin subcuenta" no tiene fila y va al final.
+ */
+export const pendingGroupOrder = pgTable(
+  "pending_group_order",
+  {
+    owner: text("owner").notNull(),
+    ghlLocationId: text("ghl_location_id").notNull(),
+    position: integer("position").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.owner, t.ghlLocationId] })],
+)
+
 export const invoices = pgTable("invoices", {
   id: text("id").primaryKey(),
   number: text("number").notNull().unique(),

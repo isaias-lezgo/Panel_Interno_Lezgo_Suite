@@ -1,7 +1,7 @@
 import "server-only"
 
 import { unstable_cache, updateTag } from "next/cache"
-import { desc, eq, inArray, max, ne } from "drizzle-orm"
+import { asc, desc, eq, inArray, max, ne } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
@@ -182,6 +182,21 @@ function orderChecklist(items: ChecklistItem[]) {
 export async function listPendings(): Promise<Pending[]> {
   if (!db) return demo.pendings
   return (await db.select().from(schema.pendings)) as Pending[]
+}
+
+/**
+ * El orden de los grupos de cada persona: ids de subcuenta por pestaña. En
+ * modo demo no hay orden guardado y los grupos van por nombre.
+ */
+export async function listPendingGroupOrder(): Promise<Record<string, string[]>> {
+  if (!db) return {}
+  const rows = await db
+    .select()
+    .from(schema.pendingGroupOrder)
+    .orderBy(asc(schema.pendingGroupOrder.position))
+  const order: Record<string, string[]> = {}
+  for (const row of rows) (order[row.owner] ??= []).push(row.ghlLocationId)
+  return order
 }
 
 /* ------------------------------------------- contactos de Lezgo Suite */

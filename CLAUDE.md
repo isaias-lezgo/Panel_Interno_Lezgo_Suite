@@ -196,7 +196,11 @@ cookie `pendientes_tab`, que lee el servidor para no parpadear. Se escriben desd
 subcuenta entre un pendiente y el siguiente, o desde la caja al pie de cada
 grupo, donde la subcuenta ya viene puesta. Marcar hecho no borra: el renglón
 se tacha y baja al pie de su grupo, y el interruptor "Ver hechos" los
-esconde. No se editan: se borran y se vuelven a escribir. La agrupación vive
+esconde. No se editan: se borran y se vuelven a escribir. Los grupos se
+arrastran arriba y abajo desde el asa de su encabezado (también con teclado:
+espacio, flechas, espacio); cada persona guarda su orden en
+`pending_group_order`, las subcuentas sin lugar van después por nombre y
+"Sin subcuenta" siempre al final. La agrupación vive
 en `src/lib/pendings/group.ts` y corre en el navegador, no en el servidor,
 para que marcar uno lo reordene al instante; el nombre del grupo se resuelve
 en vivo contra GHL y cae al que se guardó al escribirlo. Escribe solo a

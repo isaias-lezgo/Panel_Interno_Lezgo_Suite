@@ -83,3 +83,40 @@ export async function deletePending(id: string): Promise<Done> {
   refresh()
   return { ok: true }
 }
+
+/**
+ * Guarda el orden de los grupos de una pestaña tal como quedó al arrastrar.
+ * Llega completo, así que se reescribe entero: borrar e insertar en un solo
+ * lote no deja la pestaña a medias.
+ */
+export async function reorderPendingGroups(
+  owner: PendingOwner,
+  locationIds: string[],
+): Promise<Done> {
+  if (!db) return { ok: false, error: NO_DB }
+  if (!isPendingOwner(owner)) {
+    return { ok: false, error: "Esa persona no está en el equipo." }
+  }
+  if (
+    new Set(locationIds).size !== locationIds.length ||
+    locationIds.some((id) => typeof id !== "string" || !id)
+  ) {
+    return { ok: false, error: "El orden llegó mal. Vuelve a intentarlo." }
+  }
+
+  const order = schema.pendingGroupOrder
+  const clear = db.delete(order).where(eq(order.owner, owner))
+  if (locationIds.length === 0) {
+    await clear
+  } else {
+    await db.batch([
+      clear,
+      db.insert(order).values(
+        locationIds.map((ghlLocationId, position) => ({ owner, ghlLocationId, position })),
+      ),
+    ])
+  }
+
+  refresh()
+  return { ok: true }
+}

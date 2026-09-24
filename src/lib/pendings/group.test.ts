@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { groupPendings } from "./group"
+import { groupPendings, moveGroup } from "./group"
 import type { Pending } from "@/lib/types"
 
 const pending = (p: Partial<Pending> & { id: string }): Pending => ({
@@ -96,5 +96,45 @@ describe("groupPendings", () => {
 
   it("no devuelve grupos vacíos", () => {
     expect(groupPendings([], names)).toEqual([])
+  })
+
+  it("respeta el orden guardado y deja lo nuevo después, por nombre", () => {
+    const groups = groupPendings(
+      [
+        pending({ id: "1", ghlLocationId: "loc_a" }),
+        pending({ id: "2", ghlLocationId: "loc_b" }),
+        pending({ id: "3", ghlLocationId: "loc_z", ghlLocationName: "Zeta S.A." }),
+        pending({ id: "4" }),
+      ],
+      names,
+      ["loc_z", "loc_b"],
+    )
+    expect(groups.map((g) => g.name)).toEqual([
+      "Zeta S.A.",
+      "Café Norte",
+      "Acme Dental",
+      "Sin subcuenta",
+    ])
+  })
+})
+
+describe("moveGroup", () => {
+  const groups = groupPendings(
+    [
+      pending({ id: "1", ghlLocationId: "loc_a" }),
+      pending({ id: "2", ghlLocationId: "loc_b" }),
+      pending({ id: "3", ghlLocationId: "loc_c", ghlLocationName: "Dulcería" }),
+      pending({ id: "4" }),
+    ],
+    names,
+  )
+
+  it("sube y baja un grupo sin tocar 'Sin subcuenta'", () => {
+    expect(moveGroup(groups, "loc_c", "loc_a")).toEqual(["loc_c", "loc_a", "loc_b"])
+    expect(moveGroup(groups, "loc_a", "loc_c")).toEqual(["loc_b", "loc_c", "loc_a"])
+  })
+
+  it("deja el orden igual si el destino no existe", () => {
+    expect(moveGroup(groups, "loc_a", "nada")).toEqual(["loc_a", "loc_b", "loc_c"])
   })
 })

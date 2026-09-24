@@ -1,11 +1,37 @@
 "use client"
 
-import { useMemo, useOptimistic, useRef, useState, useTransition } from "react"
-import { PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  useId,
+  useMemo,
+  useOptimistic,
+  useRef,
+  useState,
+  useTransition,
+} from "react"
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+  type Modifier,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+import { GripVerticalIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 import {
   createPending,
   deletePending,
+  reorderPendingGroups,
   togglePending,
 } from "@/app/(panel)/pendientes/actions"
 import { LinkPicker } from "@/components/clients/link-picker"
@@ -15,7 +41,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { groupPendings, SIN_SUBCUENTA } from "@/lib/pendings/group"
+import { groupPendings, moveGroup, SIN_SUBCUENTA } from "@/lib/pendings/group"
 import {
   isPendingOwner,
   OWNER_COOKIE,
@@ -64,6 +90,16 @@ function apply(current: Pending[], edit: Edit): Pending[] {
   )
 }
 
+type Order = Record<string, string[]>
+
+const reorder = (current: Order, next: { owner: PendingOwner; ids: string[] }) => ({
+  ...current,
+  [next.owner]: next.ids,
+})
+
+/** El arrastre solo se mueve en vertical. */
+const verticalOnly: Modifier = ({ transform }) => ({ ...transform, x: 0 })
+
 /** Un año: la pestaña se recuerda hasta que alguien abra otra. */
 const rememberOwner = (owner: PendingOwner) => {
   document.cookie = `${OWNER_COOKIE}=${owner}; path=/; max-age=31536000; samesite=lax`
@@ -76,15 +112,18 @@ const cuenta = (n: number, uno: string, varios: string) =>
  * Los pendientes de una persona, agrupados por subcuenta. Se agrupan aquí y
  * no en el servidor para que marcar uno lo mande al pie de su grupo en el
  * acto, sin esperar el viaje de ida y vuelta. Cada persona tiene su pestaña,
- * y lo que se escribe entra en la pestaña abierta.
+ * y lo que se escribe entra en la pestaña abierta. Los grupos se arrastran
+ * desde el asa de su encabezado y cada persona guarda su propio orden.
  */
 export function PendingList({
   pendings,
+  groupOrder,
   initialOwner,
   locations,
   locationsError,
 }: {
   pendings: Pending[]
+  groupOrder: Order
   initialOwner: PendingOwner
   locations: LocationOption[]
   locationsError: string | null
@@ -94,13 +133,14 @@ export function PendingList({
   const [showDone, setShowDone] = useState(false)
   const [owner, setOwner] = useState(initialOwner)
   const [all, edit] = useOptimistic(pendings, apply)
+  const [order, setOrder] = useOptimistic(groupOrder, reorder)
   const list = all.filter((p) => p.owner === owner)
 
   const names = useMemo(
     () => new Map(locations.map((l) => [l.id, l.name])),
     [locations],
   )
-  const groups = groupPendings(list, names)
+  const groups = groupPendings(list, names, order[owner])
   const shown = showDone ? groups : groups.filter((g) => g.open.length > 0)
   const open = list.filter((p) => !p.done).length
   const done = list.length - open
@@ -116,6 +156,15 @@ export function PendingList({
     run({ type: "add", pending: draft(body, owner, locationId, name) }, () =>
       createPending({ body, owner, locationId }),
     )
+
+  const move = (moved: string, target: string) => {
+    const ids = moveGroup(groups, moved, target)
+    start(async () => {
+      setOrder({ owner, ids })
+      const r = await reorderPendingGroups(owner, ids)
+      setError(r.ok ? null : r.error)
+    })
+  }
 
   return (
     <Tabs
@@ -182,11 +231,11 @@ export function PendingList({
                 : "Escribe el primero arriba. Una frase basta."}
             </EmptyState>
           ) : (
-            <div className="divide-y divide-border">
-              {shown.map((group) => (
+            <SortableGroups groups={shown} onMove={move}>
+              {(group, grip) => (
                 <Group
-                  key={group.locationId ?? SIN_SUBCUENTA}
                   group={group}
+                  grip={grip}
                   showDone={showDone}
                   onAdd={(body) =>
                     add(body, group.locationId, group.locationId ? group.name : null)
@@ -200,8 +249,8 @@ export function PendingList({
                     run({ type: "delete", id }, () => deletePending(id))
                   }
                 />
-              ))}
-            </div>
+              )}
+            </SortableGroups>
           )}
         </Instrument>
       </TabsContent>
@@ -280,14 +329,141 @@ function NewPending({
   )
 }
 
+/**
+ * Los grupos, reordenables desde el asa de su encabezado. "Sin subcuenta"
+ * no se arrastra ni recibe: siempre va al final.
+ */
+function SortableGroups({
+  groups,
+  onMove,
+  children,
+}: {
+  groups: PendingGroup[]
+  onMove: (moved: string, target: string) => void
+  children: (group: PendingGroup, grip: React.ReactNode) => React.ReactNode
+}) {
+  const dndId = useId()
+  const sortable = groups.flatMap((g) => (g.locationId ? [g.locationId] : []))
+  const nameOf = (id: string | number) =>
+    groups.find((g) => g.locationId === id)?.name ?? "la subcuenta"
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  )
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    onMove(String(active.id), String(over.id))
+  }
+
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Tomaste ${nameOf(active.id)}.`,
+    onDragOver: ({ active, over }) =>
+      over && over.id !== active.id
+        ? `${nameOf(active.id)} va en el lugar de ${nameOf(over.id)}.`
+        : `${nameOf(active.id)} sigue en su lugar.`,
+    onDragEnd: ({ active, over }) =>
+      over && over.id !== active.id
+        ? `${nameOf(active.id)} quedó en el lugar de ${nameOf(over.id)}.`
+        : `${nameOf(active.id)} se quedó donde estaba.`,
+    onDragCancel: ({ active }) =>
+      `Cancelado. ${nameOf(active.id)} se quedó donde estaba.`,
+  }
+
+  return (
+    <DndContext
+      id={dndId}
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[verticalOnly]}
+      onDragEnd={onDragEnd}
+      accessibility={{
+        announcements,
+        screenReaderInstructions: {
+          draggable:
+            "Para mover una subcuenta, presiona espacio. Usa las flechas arriba y abajo para elegir su lugar y vuelve a presionar espacio para soltarla. Escape cancela.",
+        },
+      }}
+    >
+      <SortableContext items={sortable} strategy={verticalListSortingStrategy}>
+        <div className="divide-y divide-border">
+          {groups.map((group) =>
+            group.locationId ? (
+              <SortableGroup
+                key={group.locationId}
+                id={group.locationId}
+                name={group.name}
+              >
+                {(grip) => children(group, grip)}
+              </SortableGroup>
+            ) : (
+              <div key={SIN_SUBCUENTA}>{children(group, null)}</div>
+            ),
+          )}
+        </div>
+      </SortableContext>
+    </DndContext>
+  )
+}
+
+function SortableGroup({
+  id,
+  name,
+  children,
+}: {
+  id: string
+  name: string
+  children: (grip: React.ReactNode) => React.ReactNode
+}) {
+  const {
+    setNodeRef,
+    setActivatorNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, attributes: { roleDescription: "subcuenta reordenable" } })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn(
+        "relative bg-card",
+        isDragging && "z-10 shadow-md ring-1 ring-border",
+      )}
+    >
+      {children(
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
+          aria-label={`Mover ${name}`}
+          className="-ml-1.5 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:cursor-grabbing"
+        >
+          <GripVerticalIcon className="size-3.5" aria-hidden />
+        </button>,
+      )}
+    </div>
+  )
+}
+
 function Group({
   group,
+  grip,
   showDone,
   onAdd,
   onToggle,
   onDelete,
 }: {
   group: PendingGroup
+  /** Asa de arrastre; `null` en "Sin subcuenta", que no se mueve. */
+  grip: React.ReactNode
   showDone: boolean
   onAdd: (body: string) => void
   onToggle: (id: string, done: boolean) => void
@@ -297,7 +473,8 @@ function Group({
 
   return (
     <section>
-      <header className="flex items-center gap-3 bg-muted/40 px-4 py-2">
+      <header className="flex items-center gap-2 bg-muted/40 px-4 py-2">
+        {grip ?? <span aria-hidden className="-ml-1.5 size-5 shrink-0" />}
         <h3 className="truncate text-sm font-medium">{group.name}</h3>
         <span className="num ml-auto shrink-0 text-xs text-muted-foreground">
           {group.open.length}

@@ -7,13 +7,18 @@ import {
   isPendingOwner,
   OWNER_COOKIE,
 } from "@/lib/pendings/owners"
-import { listLocationOptions, listPendings } from "@/lib/repository"
+import {
+  listLocationOptions,
+  listPendingGroupOrder,
+  listPendings,
+} from "@/lib/repository"
 
 export const metadata = { title: "Pendientes" }
 
 export default async function PendientesPage() {
-  const [pendings, locations, store] = await Promise.all([
+  const [pendings, groupOrder, locations, store] = await Promise.all([
     listPendings(),
+    listPendingGroupOrder(),
     listLocationOptions(),
     cookies(),
   ])
@@ -31,6 +36,7 @@ export default async function PendientesPage() {
       <div className="px-4 pb-12 md:px-6">
         <PendingList
           pendings={pendings}
+          groupOrder={groupOrder}
           initialOwner={owner}
           locations={locations.options}
           locationsError={locations.error}
