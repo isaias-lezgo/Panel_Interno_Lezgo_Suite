@@ -68,3 +68,21 @@ export function formatInMexico(
     timeZone: TIME_ZONE,
   })
 }
+
+/**
+ * Límites de un mes (`YYYY-MM`) en GMT-6, como segundos de época para
+ * filtrar en Stripe: del día 1 a las 00:00 al último segundo del mes.
+ */
+export function mexicoMonthRange(month: string) {
+  const [y, m] = month.split("-").map(Number)
+  // Medianoche en GMT-6 son las 06:00 UTC.
+  const start = Date.UTC(y, m - 1, 1, 6) / 1000
+  const end = Date.UTC(y, m, 1, 6) / 1000 - 1
+  return { start, end }
+}
+
+/** El mes `YYYY-MM` desplazado `delta` meses. */
+export function shiftMonth(month: string, delta: number) {
+  const [y, m] = month.split("-").map(Number)
+  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7)
+}

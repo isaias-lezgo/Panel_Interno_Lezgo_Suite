@@ -254,3 +254,166 @@ export async function summarizeSubscriptions() {
   }
   return out
 }
+
+/**
+ * Los `payment_intent` que pagaron una factura desde `since`. Desde la API
+ * 2025-03-31 el cargo ya no dice a qué factura pertenece; esta es la única
+ * forma de saber qué cargos son "sin factura" sin contar dos veces.
+ */
+export async function listInvoiceIntents(since: number) {
+  try {
+    const payments = await stripe()
+      .invoicePayments.list({ created: { gte: since }, limit: 100 })
+      .autoPagingToArray({ limit: 5000 })
+    const out = new Set<string>()
+    for (const p of payments) {
+      const pi = p.payment?.payment_intent
+      if (pi) out.add(typeof pi === "string" ? pi : pi.id)
+    }
+    return out
+  } catch (error) {
+    wrap(error, "/v1/invoice_payments")
+  }
+}
+
+/** Cargos creados desde `since`. */
+export async function listChargesSince(since: number, until?: number) {
+  try {
+    return await stripe()
+      .charges.list({ created: { gte: since, ...(until ? { lte: until } : {}) }, limit: 100 })
+      .autoPagingToArray({ limit: 5000 })
+  } catch (error) {
+    wrap(error, "/v1/charges")
+  }
+}
+
+const YEAR = 365 * 24 * 60 * 60
+
+/**
+ * Todo lo que la vista de cobranza necesita de un mes, en un viaje. Las
+ * facturas abiertas y los borradores van sin filtro de fecha: son dinero
+ * pendiente de cualquier mes.
+ */
+export async function fetchCobranzaInput(range: { start: number; end: number }) {
+  const client = stripe()
+  const created = { gte: range.start, lte: range.end }
+  const all = <T>(list: { autoPagingToArray(o: { limit: number }): Promise<T[]> }) =>
+    list.autoPagingToArray({ limit: 2000 })
+  const subs = (status: Stripe.SubscriptionListParams.Status) =>
+    all(client.subscriptions.list({ status, limit: 100, expand: ["data.customer"] }))
+
+  try {
+    const [
+      active,
+      trialing,
+      unpaid,
+      pastDue,
+      openInvoices,
+      draftInvoices,
+      paidInvoices,
+      schedules,
+      refunds,
+      disputes,
+      charges,
+      invoiceIntents,
+      products,
+    ] = await Promise.all([
+      subs("active"),
+      subs("trialing"),
+      subs("unpaid"),
+      subs("past_due"),
+      all(client.invoices.list({ status: "open", limit: 100 })),
+      all(client.invoices.list({ status: "draft", limit: 100 })),
+      // Pagada en el mes pero emitida antes: se busca un año hacia atrás.
+      all(
+        client.invoices.list({
+          status: "paid",
+          created: { gte: range.start - YEAR, lte: range.end },
+          limit: 100,
+        }),
+      ),
+      all(
+        client.subscriptionSchedules.list({
+          scheduled: true,
+          limit: 100,
+          expand: ["data.customer"],
+        }),
+      ),
+      all(client.refunds.list({ created, limit: 100, expand: ["data.charge"] })),
+      all(client.disputes.list({ created, limit: 100, expand: ["data.charge"] })),
+      listChargesSince(range.start, range.end),
+      // Una factura del mes pudo haberse finalizado —y abierto su pago— antes.
+      listInvoiceIntents(range.start - YEAR),
+      productNames(),
+    ])
+
+    const subscriptions = [...active, ...trialing, ...unpaid]
+
+    // Nombres: lo que ya trae cada objeto, y un retrieve para el resto.
+    const customers = new Map<string, { name: string | null; email: string | null }>()
+    const note = (c: unknown) => {
+      if (c && typeof c === "object" && "id" in c && !("deleted" in c && c.deleted)) {
+        const cus = c as Stripe.Customer
+        customers.set(cus.id, { name: cus.name?.trim() || null, email: cus.email?.trim() || null })
+      }
+    }
+    for (const s of [...subscriptions, ...pastDue]) note(s.customer)
+    for (const s of schedules) note(s.customer)
+
+    const wanted = new Set<string>()
+    const want = (c: string | { id: string } | null | undefined) => {
+      const id = typeof c === "string" ? c : c?.id
+      if (id && !customers.has(id)) wanted.add(id)
+    }
+    for (const r of refunds) if (typeof r.charge === "object") want(r.charge?.customer)
+    for (const d of disputes) if (typeof d.charge === "object") want(d.charge.customer)
+    for (const ch of charges) if (!ch.billing_details?.name) want(ch.customer)
+    await Promise.all(
+      [...wanted].map(async (id) => {
+        try {
+          note(await client.customers.retrieve(id))
+        } catch {
+          // Un cliente borrado se queda con lo que traiga el cargo.
+        }
+      }),
+    )
+
+    const priceIds = new Set<string>()
+    for (const sch of schedules) {
+      const phase = sch.phases.find((p) => p.start_date >= range.start && p.start_date <= range.end)
+      for (const it of phase?.items ?? []) {
+        const id = typeof it.price === "string" ? it.price : it.price?.id
+        if (id) priceIds.add(id)
+      }
+    }
+    const prices = new Map<string, Stripe.Price>()
+    await Promise.all(
+      [...priceIds].map(async (id) => {
+        try {
+          prices.set(id, await client.prices.retrieve(id))
+        } catch {
+          // Sin precio, el importe queda "por confirmar".
+        }
+      }),
+    )
+
+    return {
+      subscriptions,
+      pastDue,
+      openInvoices,
+      draftInvoices,
+      paidInvoices,
+      schedules,
+      prices,
+      refunds,
+      disputes,
+      charges,
+      invoiceIntents,
+      customers,
+      products,
+    }
+  } catch (error) {
+    if (error instanceof StripeError) throw error
+    wrap(error, "cobranza")
+  }
+}

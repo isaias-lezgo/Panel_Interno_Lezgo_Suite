@@ -529,7 +529,7 @@ export const panelTools = {
 
   revenueSeries: tool({
     description:
-      "Last 12 months from Stripe: collected per month (paid invoices) and new vs canceled subscriptions per month. Cents in base currency; `omitted` counts what could not be converted. There is no expansion series.",
+      "Last 12 months from Stripe: collected per month (paid invoices plus charges not tied to an invoice: wallet recharges, SPEI, payment links) and new vs canceled subscriptions per month. Cents in base currency; `omitted` counts what could not be converted. There is no expansion series.",
     inputSchema: z.object({}),
     execute: () => getRevenueSeries(),
   }),

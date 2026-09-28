@@ -1,5 +1,4 @@
 import { mexicoMonth } from "@/lib/time"
-import type { Invoice } from "@/lib/types"
 
 /**
  * Las dos series del tablero, derivadas de lo que Stripe sí sabe: facturas
@@ -54,8 +53,17 @@ export function monthKeys(now: Date, months: number) {
 
 const monthOf = (iso: string) => iso.slice(0, 7)
 
-export function monthlyCollected(
-  invoices: Invoice[],
+/** Un cobro suelto: día en GMT-6 y centavos de la moneda base (`null` si no convierte). */
+export type CollectedEntry = { day: string; amountBase: number | null }
+
+/**
+ * Lo cobrado por mes. Las entradas vienen de `collectedEntries` en
+ * `cobranza.ts`: facturas pagadas más cargos sin factura, con la misma
+ * regla que la vista de facturación, para que un mes diga lo mismo en las
+ * dos pantallas.
+ */
+export function monthlyCollectedEntries(
+  entries: CollectedEntry[],
   months: number,
   now = new Date(),
 ): CollectedPoint[] {
@@ -63,12 +71,11 @@ export function monthlyCollected(
     monthKeys(now, months).map((key) => [key, { collected: 0, omitted: 0 }]),
   )
 
-  for (const invoice of invoices) {
-    if (invoice.status !== "paid" || !invoice.paidAt) continue
-    const bucket = buckets.get(monthOf(invoice.paidAt))
+  for (const entry of entries) {
+    const bucket = buckets.get(monthOf(entry.day))
     if (!bucket) continue
-    if (invoice.amountBase === null) bucket.omitted += 1
-    else bucket.collected += invoice.amountBase
+    if (entry.amountBase === null) bucket.omitted += 1
+    else bucket.collected += entry.amountBase
   }
 
   return [...buckets].map(([key, b]) => ({ key, month: label(key), ...b }))

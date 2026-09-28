@@ -29,15 +29,24 @@ import {
 import { advisorUsers, toSubaccount } from "@/lib/lezgo-ia/from-ghl"
 import type { IaStatus, SettingValues, Voice } from "@/data/lezgo-ia"
 import {
+  fetchCobranzaInput,
   listAllSubscriptions,
+  listChargesSince,
   listCustomers,
+  listInvoiceIntents,
   listRecentInvoices,
   monthlyAmounts,
   stripeEnabled,
   summarizeSubscriptions,
 } from "@/lib/stripe/client"
 import {
-  monthlyCollected,
+  buildCobranza,
+  collectedEntries,
+  type CobranzaItem,
+} from "@/lib/stripe/cobranza"
+import { mexicoMonth, mexicoMonthRange } from "@/lib/time"
+import {
+  monthlyCollectedEntries,
   monthlyMovement,
   type CollectedPoint,
   type MovementPoint,
@@ -702,6 +711,68 @@ export async function refreshBilling() {
   updateTag("stripe")
 }
 
+/* ------------------------------------------------------------- Cobranza */
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
+
+/** El mes pedido en la URL, o el actual en GMT-6 si no es válido. */
+export function cobranzaMonth(value: string | string[] | undefined) {
+  return typeof value === "string" && MONTH.test(value) ? value : mexicoMonth()
+}
+
+/**
+ * Cinco minutos por mes, igual que las facturas. El mes va en la llave: cada
+ * mes que alguien abre se cachea por separado, y "Actualizar" los tira todos.
+ */
+const cachedCobranza = unstable_cache(
+  async (month: string) => {
+    const range = mexicoMonthRange(month)
+    const input = await fetchCobranzaInput(range)
+    return {
+      items: buildCobranza({ ...input, range, now: new Date() }),
+      fetchedAt: new Date().toISOString(),
+    }
+  },
+  ["stripe-cobranza-v2"],
+  { revalidate: 300, tags: ["stripe"] },
+)
+
+export type CobranzaRow = CobranzaItem & {
+  /** El cliente del panel, cuando el `cus_` está enlazado. */
+  client: { name: string; slug: string } | null
+}
+
+export type CobranzaFeed =
+  | { status: "ok"; month: string; rows: CobranzaRow[]; fetchedAt: string }
+  | { status: "off" | "error"; month: string; rows: []; fetchedAt: null }
+
+/**
+ * La cobranza de un mes, con cada renglón ligado a su cliente del panel
+ * cuando hay enlace. Sin Stripe no hay de dónde leerla: la vista lo dice en
+ * vez de inventar renglones.
+ */
+export async function getCobranza(month: string): Promise<CobranzaFeed> {
+  if (!stripeEnabled()) return { status: "off", month, rows: [], fetchedAt: null }
+  try {
+    const [{ items, fetchedAt }, links, clients] = await Promise.all([
+      cachedCobranza(month),
+      listStripeLinks(),
+      listClients(),
+    ])
+    const clientByCus = new Map(links.map((l) => [l.stripeCustomerId, l.clientId]))
+    const byId = new Map(clients.map((c) => [c.id, c]))
+    const rows = items.map((item) => {
+      const clientId = item.customerId ? clientByCus.get(item.customerId) : undefined
+      const c = clientId ? byId.get(clientId) : undefined
+      return { ...item, client: c ? { name: c.name, slug: c.slug } : null }
+    })
+    return { status: "ok", month, rows, fetchedAt }
+  } catch (error) {
+    console.error("Stripe no respondió; sin cobranza", error)
+    return { status: "error", month, rows: [], fetchedAt: null }
+  }
+}
+
 export async function listActivity(limit = 10): Promise<ActivityEvent[]> {
   if (!db) return demo.activity.slice(0, limit)
   return (await db
@@ -719,13 +790,24 @@ export async function listActivity(limit = 10): Promise<ActivityEvent[]> {
  */
 const cachedSeries = unstable_cache(
   async (fx: number | null, base: Currency) => {
-    const [invoicesRaw, subs] = await Promise.all([
-      listRecentInvoices(12),
+    const since = Math.floor(Date.now() / 1000) - 13 * 31 * 24 * 60 * 60
+    const [invoicesRaw, subs, charges, intents] = await Promise.all([
+      listRecentInvoices(13),
       listAllSubscriptions(),
+      listChargesSince(since),
+      listInvoiceIntents(since),
     ])
-    const invoices = invoicesRaw
-      .map((i) => mapInvoice(i, fx, () => null))
-      .filter((i): i is Invoice => i !== null)
+    // Misma regla que la vista de facturación: facturas pagadas más cargos
+    // que no pagaron una factura (recargas, SPEI, links de pago).
+    const entries = collectedEntries(invoicesRaw, charges, intents).map((e) => ({
+      day: e.day,
+      amountBase:
+        base === "mxn"
+          ? toMxn(e.amount, e.currency, fx)
+          : e.currency === "usd"
+            ? e.amount
+            : null,
+    }))
 
     const spans: SubscriptionSpan[] = subs
       // Una suscripción que nunca llegó a cobrarse no es un alta.
@@ -749,11 +831,11 @@ const cachedSeries = unstable_cache(
       })
 
     return {
-      collected: monthlyCollected(invoices, 12),
+      collected: monthlyCollectedEntries(entries, 12),
       movement: monthlyMovement(spans, 12),
     }
   },
-  ["stripe-series"],
+  ["stripe-series-v2"],
   { revalidate: 300, tags: ["stripe"] },
 )
 

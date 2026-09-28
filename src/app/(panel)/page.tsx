@@ -240,7 +240,7 @@ export default async function TableroPage() {
             label="Cobrado por mes"
             hint={
               summary.series.source === "stripe"
-                ? `Últimos 12 meses, facturas pagadas en Stripe${omitidas(summary.series.collected)}`
+                ? `Últimos 12 meses en Stripe: facturas pagadas, recargas y cobros sin factura${omitidas(summary.series.collected)}`
                 : "Sin Stripe conectado"
             }
           >

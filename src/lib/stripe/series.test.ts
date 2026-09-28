@@ -1,27 +1,12 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  monthlyCollected,
+  monthlyCollectedEntries,
   monthlyMovement,
   type SubscriptionSpan,
 } from "./series"
-import type { Invoice } from "@/lib/types"
 
 const now = new Date("2026-09-22T12:00:00Z")
-
-const invoice = (o: Partial<Invoice> & { id: string }): Invoice => ({
-  number: o.id,
-  clientId: null,
-  customerName: "X",
-  amount: 100_00,
-  currency: "mxn",
-  amountBase: 100_00,
-  status: "paid",
-  issuedAt: "2026-09-01",
-  dueAt: null,
-  memo: "",
-  ...o,
-})
 
 const span = (o: Partial<SubscriptionSpan> = {}): SubscriptionSpan => ({
   createdAt: "2026-09-01",
@@ -30,20 +15,20 @@ const span = (o: Partial<SubscriptionSpan> = {}): SubscriptionSpan => ({
   ...o,
 })
 
-describe("monthlyCollected", () => {
+describe("monthlyCollectedEntries", () => {
   it("devuelve una entrada por mes, del más viejo al más nuevo", () => {
-    const out = monthlyCollected([], 3, now)
+    const out = monthlyCollectedEntries([], 3, now)
     expect(out.map((p) => p.key)).toEqual(["2026-07", "2026-08", "2026-09"])
     expect(out.map((p) => p.collected)).toEqual([0, 0, 0])
   })
 
-  it("suma solo las facturas pagadas, por el mes en que se pagaron", () => {
-    const out = monthlyCollected(
+  it("suma cada cobro en el mes de su día", () => {
+    const out = monthlyCollectedEntries(
       [
-        invoice({ id: "a", paidAt: "2026-08-10", amountBase: 500_00 }),
-        invoice({ id: "b", paidAt: "2026-08-20", amountBase: 300_00 }),
-        invoice({ id: "c", paidAt: "2026-09-02", amountBase: 700_00 }),
-        invoice({ id: "d", status: "due", paidAt: undefined, amountBase: 900_00 }),
+        { day: "2026-08-10", amountBase: 500_00 },
+        { day: "2026-08-20", amountBase: 300_00 },
+        { day: "2026-09-02", amountBase: 700_00 },
+        { day: "2026-04-02", amountBase: 900_00 },
       ],
       3,
       now,
@@ -52,25 +37,16 @@ describe("monthlyCollected", () => {
   })
 
   it("omite lo que no se puede convertir a la moneda base en vez de inventarlo", () => {
-    const out = monthlyCollected(
+    const out = monthlyCollectedEntries(
       [
-        invoice({ id: "a", paidAt: "2026-09-05", amountBase: null, currency: "usd" }),
-        invoice({ id: "b", paidAt: "2026-09-06", amountBase: 200_00 }),
+        { day: "2026-09-05", amountBase: null },
+        { day: "2026-09-06", amountBase: 200_00 },
       ],
       1,
       now,
     )
     expect(out[0].collected).toBe(200_00)
     expect(out[0].omitted).toBe(1)
-  })
-
-  it("ignora meses fuera de la ventana", () => {
-    const out = monthlyCollected(
-      [invoice({ id: "viejo", paidAt: "2025-01-05", amountBase: 999_00 })],
-      2,
-      now,
-    )
-    expect(out.reduce((s, p) => s + p.collected, 0)).toBe(0)
   })
 })
 

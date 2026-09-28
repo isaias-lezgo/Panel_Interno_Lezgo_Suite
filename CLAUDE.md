@@ -171,6 +171,15 @@ real (`acct_1LKAgaLSMWyOIdkA`):
   `attempt_count > 0 && next_payment_attempt === null`.
 - Los estados `void` y `uncollectible` existen y **no** cuentan como por
   cobrar.
+- **Lo cobrado no son solo facturas.** Entran también las recargas de
+  wallet de GHL (cargos cuyo concepto dice "recharge") y los cobros sin
+  factura: SPEI y links de pago de GHL (`py_…`, `customer_balance`) y
+  cobros a mano. En septiembre de 2026 fueron más de la mitad del mes.
+- Desde la API 2025-03-31 el cargo **ya no trae `invoice`**: filtrar con
+  `!charge.invoice` cuenta cada factura pagada dos veces (un tablero externo
+  lo hacía). Un cargo es "sin factura" si su `payment_intent` no aparece en
+  `invoice_payments`. La regla vive en `src/lib/stripe/cobranza.ts` y la
+  usan la vista de facturación y la serie del tablero.
 - El concepto sale de la línea de **mayor importe**, no de `lines.data[0]`:
   Stripe a veces devuelve primero la línea del IVA.
 - Los precios los creó GoHighLevel (`price.metadata.created_by =
@@ -217,8 +226,19 @@ para que marcar uno lo reordene al instante; el nombre del grupo se resuelve
 en vivo contra GHL y cae al que se guardó al escribirlo. Escribe solo a
 Neon: un pendiente no existe en GoHighLevel.
 
+**Facturación.** La vista es la cobranza de un mes (`?mes=YYYY-MM`,
+en GMT-6), armada en `src/lib/stripe/cobranza.ts`: seis cifras (cobrado,
+por cobrar, total, facturas sin cobrar, recargas, requieren atención), dos
+columnas —pendiente y próximos / cobros del mes— y un calendario. Las
+facturas abiertas salen siempre, sean del mes que sean. "Por cobrar" son
+renovaciones, schedules y pausas que reanudan, al precio de lista; una
+suscripción que se cancela en el corte no cuenta. MXN y USD se suman por
+separado, sin convertir. Debajo siguen el facturado por cliente y la
+tabla de facturas de 12 meses.
+
 **Series del tablero.** Las dos gráficas se derivan de Stripe en
-`src/lib/stripe/series.ts`: "Cobrado por mes" de las facturas pagadas, y
+`src/lib/stripe/series.ts`: "Cobrado por mes" con la misma regla que la
+vista de facturación (`collectedEntries`), y
 "Altas y cancelaciones" de las fechas `created` y `canceled_at` de cada
 suscripción. **No hay serie de expansión**: Stripe no guarda el historial de
 cambios de importe, y una barra estimada junto a dos exactas se leería igual
@@ -328,7 +348,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 15 archivos: Stripe, clientes, filtros, entregas, pendientes, hora, reintento y sesión
+pnpm test         # vitest, 15 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
