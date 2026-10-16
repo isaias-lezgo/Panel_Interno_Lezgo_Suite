@@ -184,10 +184,23 @@ real (`acct_1LKAgaLSMWyOIdkA`):
   Stripe a veces devuelve primero la línea del IVA.
 - Los precios los creó GoHighLevel (`price.metadata.created_by =
   "LeadConnector"`), pero el `location_id` de ahí es el de la agencia, no el
-  de cada cliente: **no sirve para mapear**. El enlace vive en
-  `client_stripe_customers` (un cliente, varios `cus_`): se llena solo al
-  sincronizar cuando coincide correo, teléfono o nombre exacto, y lo demás se
-  elige a mano en la ficha del cliente.
+  de cada cliente: **no sirve para mapear**.
+- **Un cliente se representa en Stripe por sus suscripciones**, no por sus
+  `cus_`: un mismo `cus_` puede pagar las de dos clientes. El enlace vive en
+  `client_stripe_subscriptions` (un cliente, varias `sub_`; una `sub_`, un
+  dueño), con la foto del `cus_` que la paga. La cartera sale de
+  `listPortfolioSubscriptions()`: todas menos `incomplete_expired`. La sync
+  enlaza sola una suscripción cuyo `cus_` coincide por correo, teléfono o
+  nombre exacto, o cuyo `cus_` ya tiene todas sus demás suscripciones con un
+  solo cliente; lo demás se elige a mano en la ficha. Una factura se atribuye
+  por `parent.subscription_details.subscription`; un cobro sin suscripción
+  sigue la regla de abajo (`src/lib/clients/subscriptions.ts`).
+- **Cuentas de cobro sin suscripción** (`client_stripe_customers`): un `cus_`
+  enlazado a mano en la ficha, solo para atribuir recargas, SPEI y cobros
+  sueltos que salen de un `cus_` distinto al de la suscripción. No suma MRR
+  ni cuenta como enlace. Un cobro se atribuye por su suscripción, luego por
+  esta cuenta, luego por el `cus_` deducido. El desplegable ofrece los `cus_`
+  con cobros en 12 meses que no se atribuyen ya solos.
 
 **Implementaciones.** Se crean con "Agregar implementación": una subcuenta de
 GHL y uno o más contactos de la subcuenta Lezgo Suite (tabla
@@ -199,7 +212,14 @@ Al hacer clic en la tarjeta se abre su ficha (diálogo centrado): nombre editabl
 propio que nace de la plantilla en `src/lib/implementations/checklist.ts`.
 El `progress` de la tarjeta es el porcentaje de puntos marcados y se
 recalcula en cada cambio. A la derecha van las notas rápidas
-(`implementation_notes`): texto con fecha, sin edición. Las tarjetas se
+(`implementation_notes`): texto con fecha, sin edición. Una nota puede llevar
+imágenes (pegadas, arrastradas o con el clip; PNG, JPG, WebP o GIF, hasta 6 de
+10 MB): el navegador las sube directo al **Blob privado** `panel-notas-imagenes`
+con un token que firma `/api/notas/subir`, y `addNote` confirma cada una con
+`head()` antes de guardarla en `implementation_note_images`. Se sirven por
+`/api/notas/imagen/<id>`, detrás del candado; esa ruta no lleva extensión
+porque el matcher de `src/proxy.ts` deja pasar `.png`/`.jpg`. Borrar la nota o
+la implementación borra también los archivos de Blob. Las tarjetas se
 arrastran entre etapas. Los puntos del checklist se reordenan desde su asa:
 un punto principal se lleva sus sub-puntos y un sub-punto solo se mueve
 entre sus hermanos. La fecha máxima (`due_at`) es opcional; su semáforo
@@ -255,18 +275,18 @@ hora. Un cliente que deja de aparecer se marca `orphaned`, no se borra. Las
 subcuentas viven en `client_ghl_locations` (un cliente, varias subcuentas),
 igual que Stripe: la sync solo propone una a quien no tiene ninguna, el resto
 se agrega a mano en la ficha, y quitar un enlace lo archiva (`excluded`). Un
-`cus_` o una subcuenta que ya tiene dueño no se ofrece a otro.
+`sub_` o una subcuenta que ya tiene dueño no se ofrece a otro.
 
-El panel escribe poco y **siempre a Neon, nunca a GHL**. Son cuatro cosas: los
-enlaces (cliente de Stripe y subcuenta), las cuatro columnas de cuenta que se
+El panel escribe poco y **siempre a Neon (y a Blob), nunca a GHL**. Son cuatro cosas: los
+enlaces (suscripción de Stripe y subcuenta), las cuatro columnas de cuenta que se
 editan en la tabla, las implementaciones con su checklist y sus notas, y los
 pendientes.
 
 **Cuenta del cliente.** La tabla lleva cuatro columnas que se editan en la
 propia celda —membresía, servicio técnico, periodicidad y vencimiento de
 licencia— y que **no existen como dato en ningún lado**: se deducen en cada
-lectura (`src/lib/clients/account.ts`) de las suscripciones activas de sus
-`cus_` enlazados, con la etapa de GHL como respaldo. El nivel sale del
+lectura (`src/lib/clients/account.ts`) de sus suscripciones enlazadas que
+siguen vivas, con la etapa de GHL como respaldo. El nivel sale del
 nombre del producto de Stripe (`Lezgo Growth MXN` → Growth) ignorando los
 extras, que nombran dos niveles; la periodicidad, del `recurring` del
 precio; el vencimiento, del `current_period_end` **del item**, no de la
@@ -374,6 +394,7 @@ devuelven un error explicado en la interfaz.
 | `COPILOT_MODEL` | Sobrescribe el modelo por defecto |
 | `STRIPE_SECRET_KEY` | Clave de Stripe. Sin ella, facturación sigue en Neon/demo |
 | `STRIPE_FX_USD_MXN` | Tipo de cambio USD→MXN para normalizar los KPI |
+| `BLOB_READ_WRITE_TOKEN` | Blob privado de las imágenes de las notas. Lo pone Vercel al conectar el store |
 | `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados

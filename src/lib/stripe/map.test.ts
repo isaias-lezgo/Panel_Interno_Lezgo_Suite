@@ -136,10 +136,24 @@ describe("mapInvoice", () => {
   })
 
   test("con mapeo, resuelve el cliente del panel", () => {
-    const i = mapInvoice(factura(), 18.5, (cus) =>
+    const i = mapInvoice(factura(), 18.5, (_sub, cus) =>
       cus === "cus_test" ? "cl_prueba" : null,
     )
     expect(i?.clientId).toBe("cl_prueba")
+  })
+
+  test("pasa la suscripción que generó la factura", () => {
+    const i = mapInvoice(
+      factura({
+        parent: {
+          type: "subscription_details",
+          subscription_details: { subscription: "sub_abc" },
+        },
+      }),
+      18.5,
+      (sub) => (sub === "sub_abc" ? "cl_sub" : null),
+    )
+    expect(i?.clientId).toBe("cl_sub")
   })
 
   test("descarta monedas que el panel no sabe representar", () => {

@@ -3,13 +3,13 @@ import "server-only"
 import Stripe from "stripe"
 
 import type { PlanLine } from "@/lib/clients/account"
-import type { Currency } from "@/lib/types"
-
-import {
-  collectPayingCustomers,
-  type PayingCustomer,
-  type PayingSource,
-} from "./paying"
+import { isLive } from "@/lib/clients/subscriptions"
+import type {
+  ChargeAccount,
+  Currency,
+  PortfolioSubscription,
+  SubscriptionStatus,
+} from "@/lib/types"
 import { dayFromEpoch } from "@/lib/time"
 
 /**
@@ -80,92 +80,6 @@ export async function listAllSubscriptions() {
   }
 }
 
-export async function listActiveSubscriptions() {
-  try {
-    return await stripe()
-      .subscriptions.list({ status: "active", limit: 100 })
-      .autoPagingToArray({ limit: 1000 })
-  } catch (error) {
-    wrap(error, "/v1/subscriptions")
-  }
-}
-
-/**
- * Los clientes que alguna vez pagaron: se derivan de facturas, suscripciones
- * y cargos en vez de listar customers. La cuenta tiene más de 82 000, casi
- * todos contactos que GoHighLevel creó sin cobrarles nunca, y listarlos traía
- * los más recientes —leads— dejando fuera a quien paga desde hace años.
- * Ver `paying.ts`.
- */
-export async function listCustomers(): Promise<PayingCustomer[]> {
-  try {
-    const client = stripe()
-    const [invoices, subs, charges] = await Promise.all([
-      client.invoices.list({ limit: 100 }).autoPagingToArray({ limit: 5000 }),
-      client.subscriptions
-        .list({ status: "all", limit: 100 })
-        .autoPagingToArray({ limit: 2000 }),
-      client.charges.list({ limit: 100 }).autoPagingToArray({ limit: 5000 }),
-    ])
-
-    const id = (c: string | { id: string } | null | undefined) =>
-      typeof c === "string" ? c : (c?.id ?? null)
-
-    const sources: PayingSource[] = [
-      ...invoices.map((i) => ({
-        customer: id(i.customer),
-        name: i.customer_name,
-        email: i.customer_email,
-        phone: i.customer_phone,
-      })),
-      ...subs.map((x) => ({
-        customer: id(x.customer),
-        name: null,
-        email: null,
-        phone: null,
-      })),
-      ...charges.map((c) => ({
-        customer: id(c.customer),
-        name: c.billing_details?.name ?? null,
-        email: c.billing_details?.email ?? null,
-        phone: c.billing_details?.phone ?? null,
-      })),
-    ]
-
-    const { customers, incomplete } = collectPayingCustomers(sources)
-
-    // Los que solo aparecen en una suscripción no traen nombre: se piden
-    // directo. Son un puñado, así que una llamada por cabeza está bien.
-    const rellenos = await Promise.all(
-      incomplete.map(async (cus) => {
-        try {
-          const c = await client.customers.retrieve(cus)
-          return c.deleted ? null : c
-        } catch {
-          return null
-        }
-      }),
-    )
-    const porId = new Map(customers.map((c) => [c.id, c]))
-    for (const c of rellenos) {
-      if (!c) continue
-      const actual = porId.get(c.id)
-      if (!actual) continue
-      actual.name ??= c.name?.trim() || null
-      actual.email ??= c.email?.trim() || null
-      actual.phone ??= c.phone?.trim() || null
-    }
-
-    return [...porId.values()]
-  } catch (error) {
-    wrap(error, "/v1/customers")
-  }
-}
-
-/**
- * Suscripciones activas agrupadas por cliente y llevadas a mes: una anual
- * cuenta por su doceava parte. Solo mes y año; semana y día no se usan aquí.
- */
 /**
  * Lo que una suscripción vale al mes, por moneda. Una anual cuenta por su
  * doceava parte; semana y día no se usan en esta cuenta.
@@ -204,31 +118,43 @@ async function productNames(): Promise<Map<string, string>> {
   }
 }
 
-/** Día en hora de México: el periodo termina a una hora, no en UTC. */
-const diaDe = dayFromEpoch
-
-export type CustomerSubs = {
-  /** Lo que vale al mes, por moneda: de aquí sale el MRR. */
-  amounts: { amount: number; currency: Currency }[]
-  /** Una entrada por línea de suscripción: de aquí sale el plan. */
-  lines: PlanLine[]
-}
-
 /**
- * Lo que cada cliente paga hoy. Dos lecturas del mismo viaje: el importe
- * mensual y la forma del plan —producto, periodicidad y fin del periodo—,
- * que `lib/clients/account.ts` traduce a membresía y vencimiento.
+ * La cartera: cada suscripción de la cuenta con quién la paga y qué cobra.
+ * Es la unidad que se enlaza a un cliente del panel. Se listan las
+ * suscripciones y no los customers: la cuenta tiene más de 82 000 `cus_`,
+ * casi todos contactos que GoHighLevel creó sin cobrarles nunca, y las
+ * suscripciones son unos cientos.
+ *
+ * Las `incomplete_expired` se omiten: nunca llegaron a cobrarse. Las
+ * canceladas se quedan, porque sus facturas viejas también se atribuyen.
  */
-export async function summarizeSubscriptions() {
-  const [subs, names] = await Promise.all([
-    listActiveSubscriptions(),
-    productNames(),
-  ])
-  const out = new Map<string, CustomerSubs>()
+export async function listPortfolioSubscriptions(): Promise<PortfolioSubscription[]> {
+  let subs: Stripe.Subscription[]
+  let names: Map<string, string>
+  try {
+    ;[subs, names] = await Promise.all([
+      stripe()
+        .subscriptions.list({ status: "all", limit: 100, expand: ["data.customer"] })
+        .autoPagingToArray({ limit: 3000 }),
+      productNames(),
+    ])
+  } catch (error) {
+    if (error instanceof StripeError) throw error
+    wrap(error, "/v1/subscriptions")
+  }
+
+  const out: PortfolioSubscription[] = []
   for (const s of subs) {
-    const cus = typeof s.customer === "string" ? s.customer : s.customer.id
-    const entry = out.get(cus) ?? { amounts: [], lines: [] }
-    entry.amounts.push(...monthlyAmounts(s))
+    if (s.status === "incomplete_expired") continue
+    const cus = s.customer
+    const customerId = typeof cus === "string" ? cus : cus.id
+    const customer =
+      typeof cus === "object" && !("deleted" in cus && cus.deleted)
+        ? (cus as Stripe.Customer)
+        : null
+    const email = customer?.email?.trim() || null
+
+    const lines: PlanLine[] = []
     for (const item of s.items.data) {
       const price = item.price
       const rec = price.recurring
@@ -239,20 +165,96 @@ export async function summarizeSubscriptions() {
           : "name" in price.product
             ? price.product.name
             : null
-      entry.lines.push({
+      lines.push({
         label: producto || price.nickname || s.description || "",
         amount: (price.unit_amount ?? 0) * (item.quantity ?? 1),
         currency: price.currency as Currency,
         interval: rec.interval,
         intervalCount: rec.interval_count,
-        renewsAt: item.current_period_end
-          ? diaDe(item.current_period_end)
-          : null,
+        renewsAt: item.current_period_end ? diaDe(item.current_period_end) : null,
       })
     }
-    out.set(cus, entry)
+    const label =
+      [...new Set([...lines].sort((a, b) => b.amount - a.amount).map((l) => l.label))]
+        .filter(Boolean)
+        .join(" + ") ||
+      s.description ||
+      "Suscripción"
+
+    const status = s.status as SubscriptionStatus
+    out.push({
+      id: s.id,
+      customerId,
+      customerName: customer?.name?.trim() || email || customerId,
+      email,
+      phone: customer?.phone?.trim() || null,
+      status,
+      label,
+      // El MRR es lo que se cobra hoy: solo las activas.
+      amounts: status === "active" ? monthlyAmounts(s) : [],
+      // La cuenta del cliente sale de lo que sigue vivo, aunque esté en
+      // prueba o con un cobro fallido.
+      plan: isLive(status) ? lines : [],
+      createdAt: diaDe(s.created),
+      canceledAt: s.canceled_at ? diaDe(s.canceled_at) : null,
+    })
   }
   return out
+}
+
+/** Día en hora de México: el periodo termina a una hora, no en UTC. */
+const diaDe = dayFromEpoch
+
+/**
+ * Quién cobró algo en los últimos 12 meses, por `cus_`: de aquí se eligen las
+ * cuentas de cobro sin suscripción. Se deriva de los cargos y no de listar
+ * customers, que pasan de 82 000. El nombre sale del cargo; si ninguno lo
+ * trae, se pide el customer, que son pocos.
+ */
+export async function listChargingCustomers(): Promise<ChargeAccount[]> {
+  const since = Math.floor(Date.now() / 1000) - 365 * 24 * 60 * 60
+  const charges = await listChargesSince(since)
+  const porId = new Map<string, ChargeAccount>()
+  for (const ch of charges) {
+    if (ch.status !== "succeeded" || ch.refunded) continue
+    const cus = typeof ch.customer === "string" ? ch.customer : ch.customer?.id
+    const currency = ch.currency.toLowerCase()
+    if (!cus || (currency !== "mxn" && currency !== "usd")) continue
+    const a = porId.get(cus) ?? {
+      id: cus,
+      name: "",
+      email: null,
+      charges: 0,
+      recharges: 0,
+      totals: {},
+      lastAt: null,
+    }
+    a.name ||= ch.billing_details?.name?.trim() || ""
+    a.email ??= ch.billing_details?.email?.trim() || null
+    a.charges += 1
+    if ((ch.description ?? "").toLowerCase().includes("recharge")) a.recharges += 1
+    a.totals[currency] = (a.totals[currency] ?? 0) + ch.amount
+    const day = diaDe(ch.created)
+    if (!a.lastAt || day > a.lastAt) a.lastAt = day
+    porId.set(cus, a)
+  }
+
+  const sinNombre = [...porId.values()].filter((a) => !a.name)
+  await Promise.all(
+    sinNombre.map(async (a) => {
+      try {
+        const c = await stripe().customers.retrieve(a.id)
+        if (!c.deleted) {
+          a.name = c.name?.trim() || ""
+          a.email ??= c.email?.trim() || null
+        }
+      } catch {
+        // Un customer borrado se queda con lo que traiga el cargo.
+      }
+    }),
+  )
+  for (const a of porId.values()) a.name ||= a.email || a.id
+  return [...porId.values()]
 }
 
 /**

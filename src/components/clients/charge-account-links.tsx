@@ -4,25 +4,37 @@ import { useState, useTransition } from "react"
 import { XIcon } from "lucide-react"
 
 import {
-  linkStripeCustomer,
-  searchStripeCustomers,
-  unlinkStripeCustomer,
+  linkChargeAccount,
+  searchChargeAccounts,
+  unlinkChargeAccount,
 } from "@/app/(panel)/clientes/actions"
 import { EmptyState } from "@/components/panel/page-header"
 import { StatusChip } from "@/components/signal/status-chip"
 import { Button } from "@/components/ui/button"
-import { money } from "@/lib/format"
-import type {
-  ClientDetail,
-  Currency,
-  StripeCustomerOption,
-} from "@/lib/types"
+import { moneySigned, shortDate } from "@/lib/format"
+import type { ChargeAccount, ClientDetail, Currency } from "@/lib/types"
 
 import { LinkPicker } from "./link-picker"
 
 type Result = { ok: true } | { ok: false; error: string }
 
-export function StripeLinks({
+/** "$1,403 · 5 recargas": lo cobrado en 12 meses, cada moneda aparte. */
+function resumen(
+  a: Pick<ChargeAccount, "charges" | "recharges" | "totals">,
+  base: Currency,
+) {
+  if (a.charges === 0) return "Sin cobros en 12 meses"
+  const importes = (Object.entries(a.totals) as [Currency, number][])
+    .map(([c, v]) => moneySigned(v, c, base))
+    .join(" + ")
+  const que =
+    a.recharges === a.charges
+      ? `${a.recharges} ${a.recharges === 1 ? "recarga" : "recargas"}`
+      : `${a.charges} ${a.charges === 1 ? "cobro" : "cobros"}`
+  return `${importes} · ${que}`
+}
+
+export function ChargeAccountLinks({
   clientId,
   links,
   options,
@@ -31,8 +43,8 @@ export function StripeLinks({
   currency,
 }: {
   clientId: string
-  links: ClientDetail["stripe"]
-  options: StripeCustomerOption[]
+  links: ClientDetail["chargeAccounts"]
+  options: ChargeAccount[]
   optionsTotal: number
   optionsError: string | null
   currency: Currency
@@ -46,43 +58,37 @@ export function StripeLinks({
       setError(r.ok ? null : r.error)
     })
 
-  const toOption = (o: StripeCustomerOption) => ({
-    value: o.id,
-    label: o.name,
-    detail: o.email ?? o.id,
-    badge: o.active
-      ? o.mrr === null
-        ? "Activa"
-        : `${money(o.mrr, currency)}/mes`
-      : undefined,
+  const toOption = (a: ChargeAccount) => ({
+    value: a.id,
+    label: a.name,
+    detail: `${a.email ?? a.id}${a.lastAt ? ` · último ${shortDate(a.lastAt)}` : ""}`,
+    badge: resumen(a, currency),
   })
-
-  const amount = (mrr: number | null, active: boolean) =>
-    !active ? "Sin suscripción" : mrr === null ? "Activa" : `${money(mrr, currency)}/mes`
 
   return (
     <div>
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <span className="text-xs text-muted-foreground">
-          {optionsError ?? `${optionsTotal} sin dueño en Stripe`}
+          {optionsError ?? `${optionsTotal} con cobros y sin dueño`}
         </span>
         <LinkPicker
           options={options.map(toOption)}
-          onSearch={async (q) => (await searchStripeCustomers(q)).map(toOption)}
-          placeholder="Buscar por nombre o correo"
-          empty="Nadie en Stripe coincide."
-          buttonLabel="Agregar cliente de Stripe"
+          onSearch={async (q) => (await searchChargeAccounts(q)).map(toOption)}
+          placeholder="Buscar por nombre, correo o cus_"
+          empty="Nadie con cobros coincide."
+          buttonLabel="Agregar cuenta de cobro"
           disabled={pending || Boolean(optionsError)}
-          onPick={(cus) => run(() => linkStripeCustomer(clientId, cus))}
+          onPick={(cus) => run(() => linkChargeAccount(clientId, cus))}
         />
       </div>
 
       {error && <p className="px-4 pt-3 text-xs text-status-risk">{error}</p>}
 
       {links.length === 0 ? (
-        <EmptyState title="Sin cliente de Stripe">
-          Elige uno del desplegable. Los que coinciden por correo, teléfono o
-          nombre exacto se enlazan solos al sincronizar.
+        <EmptyState title="Sin cuentas de cobro">
+          Solo hace falta si el cliente paga recargas, SPEI o cobros sueltos
+          desde un cliente de Stripe que no es el de su suscripción. No suma al
+          MRR.
         </EmptyState>
       ) : (
         <ul className="divide-y divide-border">
@@ -94,12 +100,12 @@ export function StripeLinks({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{l.name}</p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {l.email ?? "Sin correo"} ·{" "}
+                  {l.lastAt ? `Último cobro ${shortDate(l.lastAt)} · ` : ""}
                   <code className="num">{l.stripeCustomerId}</code>
                 </p>
               </div>
               <span className="num text-sm whitespace-nowrap">
-                {amount(l.mrr, l.active)}
+                {resumen(l, currency)}
               </span>
               <StatusChip tone={l.linkedBy === "auto" ? "live" : "build"}>
                 {l.linkedBy === "auto" ? "Automático" : "Manual"}
@@ -108,8 +114,8 @@ export function StripeLinks({
                 size="icon-xs"
                 variant="ghost"
                 disabled={pending}
-                aria-label={`Quitar ${l.name}`}
-                onClick={() => run(() => unlinkStripeCustomer(l.stripeCustomerId))}
+                aria-label={`Quitar la cuenta de cobro ${l.name}`}
+                onClick={() => run(() => unlinkChargeAccount(l.stripeCustomerId))}
               >
                 <XIcon />
               </Button>

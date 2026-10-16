@@ -32,7 +32,7 @@ export function SyncButton({
             const r = await action()
             setNote(
               r.ok
-                ? `${r.clients} clientes · ${r.stripeLinked} enlaces a Stripe · ${r.locationsLinked} subcuentas`
+                ? `${r.clients} clientes · ${r.subscriptionsLinked} suscripciones enlazadas · ${r.locationsLinked} subcuentas`
                 : r.error,
             )
           })

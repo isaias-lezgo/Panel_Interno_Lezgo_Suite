@@ -1,6 +1,7 @@
 "use server"
 
 import { refresh } from "next/cache"
+import { del, head } from "@vercel/blob"
 import { and, eq, isNull, max } from "drizzle-orm"
 
 import { db, schema } from "@/db"
@@ -8,6 +9,11 @@ import {
   checklistProgress,
   checklistRows,
 } from "@/lib/implementations/checklist"
+import {
+  NOTE_IMAGE_MAX_COUNT,
+  noteImageFolder,
+  noteImageProblem,
+} from "@/lib/implementations/note-images"
 import {
   getLezgoContact,
   listClients,
@@ -306,52 +312,141 @@ export async function deleteChecklistItem(itemId: string): Promise<Done> {
 
 /* ---------------------------------------------------------- notas rápidas */
 
+/**
+ * Una nota lleva texto, imágenes o ambos. Las imágenes ya las subió el
+ * navegador a Blob; de él solo llega el `pathname`, y aquí se confirma con
+ * `head()` que existe, que es de esta implementación y qué tipo y tamaño
+ * tiene. Si algo falla, lo subido se borra para no dejar huérfanos.
+ */
 export async function addNote(
   implementationId: string,
   body: string,
+  imagePaths: string[] = [],
 ): Promise<Done> {
-  if (!db) return { ok: false, error: NO_DB }
   const clean = body.trim()
-  if (!clean) return { ok: false, error: "Escribe la nota." }
+  const paths = [...new Set(imagePaths)]
+  const folder = noteImageFolder(implementationId)
+  // Solo lo de esta implementación: de otra carpeta no se borra nada.
+  const discard = () => removeBlobs(paths.filter((p) => p.startsWith(folder)))
+
+  if (!db) {
+    await discard()
+    return { ok: false, error: NO_DB }
+  }
+
+  if (!clean && paths.length === 0) {
+    return { ok: false, error: "Escribe la nota o agrega una imagen." }
+  }
   if (clean.length > 2000) {
+    await discard()
     return { ok: false, error: "La nota pasa de 2000 caracteres." }
+  }
+  if (paths.length > NOTE_IMAGE_MAX_COUNT) {
+    await discard()
+    return { ok: false, error: `Una nota lleva hasta ${NOTE_IMAGE_MAX_COUNT} imágenes.` }
+  }
+  if (paths.some((p) => !p.startsWith(folder))) {
+    await discard()
+    return { ok: false, error: "Una de las imágenes no es de esta implementación." }
   }
   const [exists] = await db
     .select({ id: schema.implementations.id })
     .from(schema.implementations)
     .where(eq(schema.implementations.id, implementationId))
-  if (!exists) return { ok: false, error: "Esa implementación ya no existe." }
-  await db.insert(schema.implementationNotes).values({
-    id: `nt_${crypto.randomUUID()}`,
+  if (!exists) {
+    await discard()
+    return { ok: false, error: "Esa implementación ya no existe." }
+  }
+
+  let files: { pathname: string; contentType: string; size: number }[]
+  try {
+    files = await Promise.all(paths.map((p) => head(p)))
+  } catch {
+    await discard()
+    return { ok: false, error: "No se encontró una de las imágenes en Blob. Vuelve a adjuntarla." }
+  }
+  if (files.some((f) => noteImageProblem({ type: f.contentType, size: f.size }))) {
+    await discard()
+    return { ok: false, error: "Solo imágenes PNG, JPG, WebP o GIF de hasta 10 MB." }
+  }
+
+  const noteId = `nt_${crypto.randomUUID()}`
+  const insertNote = db.insert(schema.implementationNotes).values({
+    id: noteId,
     implementationId,
     body: clean,
   })
+  if (files.length === 0) {
+    await insertNote
+  } else {
+    await db.batch([
+      insertNote,
+      db.insert(schema.implementationNoteImages).values(
+        files.map((f, position) => ({
+          id: `ni_${crypto.randomUUID()}`,
+          noteId,
+          pathname: f.pathname,
+          contentType: f.contentType,
+          size: f.size,
+          position,
+        })),
+      ),
+    ])
+  }
   refresh()
   return { ok: true }
 }
 
 export async function deleteNote(noteId: string): Promise<Done> {
   if (!db) return { ok: false, error: NO_DB }
+  const images = await db
+    .select({ pathname: schema.implementationNoteImages.pathname })
+    .from(schema.implementationNoteImages)
+    .where(eq(schema.implementationNoteImages.noteId, noteId))
   const [row] = await db
     .delete(schema.implementationNotes)
     .where(eq(schema.implementationNotes.id, noteId))
     .returning({ id: schema.implementationNotes.id })
   if (!row) return { ok: false, error: "Esa nota ya no existe." }
+  await removeBlobs(images.map((i) => i.pathname))
   refresh()
   return { ok: true }
 }
 
 /**
- * Borra la implementación con sus contactos, checklist y notas (en cascada).
- * Solo toca Neon: la subcuenta y los contactos de GHL siguen intactos.
+ * Borra archivos de Blob sin tumbar la acción: si falla, queda un archivo
+ * sin nota, que no se ve en ningún lado.
+ */
+async function removeBlobs(pathnames: string[]) {
+  if (pathnames.length === 0) return
+  try {
+    await del(pathnames)
+  } catch (error) {
+    console.error("No se pudieron borrar imágenes de Blob", error)
+  }
+}
+
+/**
+ * Borra la implementación con sus contactos, checklist y notas (en cascada),
+ * y las imágenes de esas notas en Blob.
+ * En GHL no toca nada: la subcuenta y sus contactos siguen intactos.
  */
 export async function deleteImplementation(id: string): Promise<Done> {
   if (!db) return { ok: false, error: NO_DB }
+  const images = await db
+    .select({ pathname: schema.implementationNoteImages.pathname })
+    .from(schema.implementationNoteImages)
+    .innerJoin(
+      schema.implementationNotes,
+      eq(schema.implementationNoteImages.noteId, schema.implementationNotes.id),
+    )
+    .where(eq(schema.implementationNotes.implementationId, id))
   const [row] = await db
     .delete(schema.implementations)
     .where(eq(schema.implementations.id, id))
     .returning({ id: schema.implementations.id })
   if (!row) return { ok: false, error: "Esa implementación ya no existe." }
+  await removeBlobs(images.map((i) => i.pathname))
   refresh()
   return { ok: true }
 }

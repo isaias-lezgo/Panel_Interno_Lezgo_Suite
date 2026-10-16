@@ -32,12 +32,12 @@ import {
   fetchCobranzaInput,
   listAllSubscriptions,
   listChargesSince,
-  listCustomers,
+  listChargingCustomers,
   listInvoiceIntents,
+  listPortfolioSubscriptions,
   listRecentInvoices,
   monthlyAmounts,
   stripeEnabled,
-  summarizeSubscriptions,
 } from "@/lib/stripe/client"
 import {
   buildCobranza,
@@ -53,6 +53,8 @@ import {
   type SubscriptionSpan,
 } from "@/lib/stripe/series"
 import { resolveAccount } from "@/lib/clients/account"
+import { attribution, isLive } from "@/lib/clients/subscriptions"
+import { noteImageSrc } from "@/lib/implementations/note-images"
 import { mapInvoice, toMxn } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
@@ -70,16 +72,20 @@ import type {
   InvoiceRow,
   LocationLink,
   LocationOption,
+  NoteImage,
   Pending,
-  StripeCustomerOption,
-  StripeLink,
+  ChargeAccount,
+  CustomerLink,
+  PortfolioSubscription,
+  SubscriptionLink,
+  SubscriptionOption,
 } from "@/lib/types"
 
 export type {
   ClientDetail,
   ClientRow,
   LocationOption,
-  StripeCustomerOption,
+  SubscriptionOption,
 } from "@/lib/types"
 import { dayFromEpoch } from "@/lib/time"
 
@@ -107,12 +113,23 @@ export async function getClient(slug: string): Promise<Client | undefined> {
 }
 
 /** Solo los enlaces vivos: los que se quitaron a mano quedan archivados. */
-export async function listStripeLinks(): Promise<StripeLink[]> {
-  if (!db) return demo.stripeLinks
+export async function listSubscriptionLinks(): Promise<SubscriptionLink[]> {
+  if (!db) return demo.subscriptionLinks
+  return (await db
+    .select()
+    .from(schema.clientStripeSubscriptions)
+    .where(
+      ne(schema.clientStripeSubscriptions.linkedBy, "excluded"),
+    )) as SubscriptionLink[]
+}
+
+/** Cuentas de cobro sin suscripción vivas: `cus_` enlazados a mano. */
+export async function listCustomerLinks(): Promise<CustomerLink[]> {
+  if (!db) return []
   return (await db
     .select()
     .from(schema.clientStripeCustomers)
-    .where(ne(schema.clientStripeCustomers.linkedBy, "excluded"))) as StripeLink[]
+    .where(ne(schema.clientStripeCustomers.linkedBy, "excluded"))) as CustomerLink[]
 }
 
 /** Igual que con Stripe: solo los vivos, los quitados quedan archivados. */
@@ -141,7 +158,7 @@ export async function listImplementations(): Promise<Implementation[]> {
       notes: [],
     }))
   }
-  const [rows, contacts, items, notes] = await Promise.all([
+  const [rows, contacts, items, notes, images] = await Promise.all([
     db
       .select()
       .from(schema.implementations)
@@ -155,6 +172,13 @@ export async function listImplementations(): Promise<Implementation[]> {
       .select()
       .from(schema.implementationNotes)
       .orderBy(desc(schema.implementationNotes.createdAt)),
+    db
+      .select({
+        id: schema.implementationNoteImages.id,
+        noteId: schema.implementationNoteImages.noteId,
+      })
+      .from(schema.implementationNoteImages)
+      .orderBy(schema.implementationNoteImages.position),
   ])
   const contactsOf = new Map<string, ImplementationContact[]>()
   for (const c of contacts) {
@@ -166,9 +190,16 @@ export async function listImplementations(): Promise<Implementation[]> {
   for (const { implementationId, ...item } of items) {
     itemsOf.set(implementationId, [...(itemsOf.get(implementationId) ?? []), item])
   }
+  const imagesOf = new Map<string, NoteImage[]>()
+  for (const { id, noteId } of images) {
+    imagesOf.set(noteId, [...(imagesOf.get(noteId) ?? []), { id, src: noteImageSrc(id) }])
+  }
   const notesOf = new Map<string, ImplementationNote[]>()
   for (const { implementationId, ...note } of notes) {
-    notesOf.set(implementationId, [...(notesOf.get(implementationId) ?? []), note])
+    notesOf.set(implementationId, [
+      ...(notesOf.get(implementationId) ?? []),
+      { ...note, images: imagesOf.get(note.id) ?? [] },
+    ])
   }
   return rows.map((r) => ({
     ...(r as ImplementationRow),
@@ -176,6 +207,21 @@ export async function listImplementations(): Promise<Implementation[]> {
     checklist: orderChecklist(itemsOf.get(r.id) ?? []),
     notes: notesOf.get(r.id) ?? [],
   }))
+}
+
+/** Dónde está en Blob la imagen de una nota; `null` si no existe. */
+export async function getNoteImage(
+  id: string,
+): Promise<{ pathname: string; contentType: string } | null> {
+  if (!db) return null
+  const [row] = await db
+    .select({
+      pathname: schema.implementationNoteImages.pathname,
+      contentType: schema.implementationNoteImages.contentType,
+    })
+    .from(schema.implementationNoteImages)
+    .where(eq(schema.implementationNoteImages.id, id))
+  return row ?? null
 }
 
 /** Cada punto principal seguido de sus sub-puntos, ambos por `position`. */
@@ -309,33 +355,14 @@ export function baseCurrency(): Currency {
 /* ------------------------------------------------------ Stripe (cacheado) */
 
 /**
- * Quién paga en Stripe se deriva de todo el historial de cobros, así que
- * cuesta unos segundos armarla. Cambia solo cuando alguien paga por primera
- * vez: una hora de caché, y el botón "Actualizar" la tira antes si urge.
+ * La cartera de suscripciones. Cambia cuando alguien contrata o cancela:
+ * una hora de caché, y el botón "Actualizar" la tira antes si urge.
  */
-const cachedStripeCustomers = unstable_cache(
-  async () => {
-    const [customers, subs] = await Promise.all([
-      listCustomers(),
-      summarizeSubscriptions(),
-    ])
-    return customers.map((c) => ({
-      id: c.id,
-      name: c.name?.trim() || c.email || c.id,
-      email: c.email ?? null,
-      phone: c.phone ?? null,
-      subscriptions: subs.get(c.id)?.amounts ?? [],
-      /** Sus líneas activas: de ahí salen membresía, periodicidad y vencimiento. */
-      plan: subs.get(c.id)?.lines ?? [],
-    }))
-  },
-  ["stripe-customers-v2"],
+const cachedPortfolio = unstable_cache(
+  () => listPortfolioSubscriptions(),
+  ["stripe-portfolio-v1"],
   { revalidate: 3600, tags: ["stripe"] },
 )
-
-type StripeCustomerSummary = Awaited<
-  ReturnType<typeof cachedStripeCustomers>
->[number]
 
 /**
  * Centavos en moneda base, o `null` si no hay ninguna suscripción activa o
@@ -366,13 +393,13 @@ function mrrOf(
   return { total, unconverted }
 }
 
-async function stripeCustomersOrNull(): Promise<{
-  list: StripeCustomerSummary[]
+async function portfolioOrNull(): Promise<{
+  list: PortfolioSubscription[]
   error: string | null
 }> {
   if (!stripeEnabled()) return { list: [], error: "Falta STRIPE_SECRET_KEY" }
   try {
-    return { list: await cachedStripeCustomers(), error: null }
+    return { list: await cachedPortfolio(), error: null }
   } catch (error) {
     console.error("Stripe no respondió", error)
     return { list: [], error: "Stripe no respondió" }
@@ -380,17 +407,16 @@ async function stripeCustomersOrNull(): Promise<{
 }
 
 /**
- * Clientes de Stripe que nadie tiene todavía. La cuenta pasa de mil
- * registros, así que el desplegable no los recibe todos: se sirve una
- * primera página (los que pagan, arriba) y lo demás se busca contra el
- * servidor conforme se escribe.
+ * Suscripciones que nadie tiene todavía. El desplegable recibe una primera
+ * página —las vivas arriba— y lo demás se busca contra el servidor conforme
+ * se escribe: por cliente de Stripe, correo, producto o id.
  */
-export async function listStripeCustomerOptions(query = "", limit = 25) {
+export async function listSubscriptionOptions(query = "", limit = 25) {
   const [{ list, error }, links] = await Promise.all([
-    stripeCustomersOrNull(),
-    listStripeLinks(),
+    portfolioOrNull(),
+    listSubscriptionLinks(),
   ])
-  const linked = new Set(links.map((l) => l.stripeCustomerId))
+  const linked = new Set(links.map((l) => l.stripeSubscriptionId))
   const base = baseCurrency()
   const fx = usdToMxnRate()
   // Sin acentos en ambos lados: quien busca "duran" espera ver "Durán".
@@ -402,26 +428,86 @@ export async function listStripeCustomerOptions(query = "", limit = 25) {
   const q = plano(query.trim())
 
   const libres = list.filter(
-    (c) =>
-      !linked.has(c.id) &&
+    (s) =>
+      !linked.has(s.id) &&
       (!q ||
-        plano(c.name).includes(q) ||
-        plano(c.email ?? "").includes(q) ||
-        c.id.toLowerCase().includes(q)),
+        plano(s.customerName).includes(q) ||
+        plano(s.email ?? "").includes(q) ||
+        plano(s.label).includes(q) ||
+        s.id.toLowerCase().includes(q) ||
+        s.customerId.toLowerCase().includes(q)),
   )
-  const options: StripeCustomerOption[] = libres
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      email: c.email,
-      active: c.subscriptions.length > 0,
-      mrr: mrrOf(c.subscriptions, base, fx).total,
-    }))
+  const options: SubscriptionOption[] = libres
     .sort(
       (a, b) =>
-        Number(b.active) - Number(a.active) ||
-        a.name.localeCompare(b.name, "es"),
+        Number(isLive(b.status)) - Number(isLive(a.status)) ||
+        a.customerName.localeCompare(b.customerName, "es") ||
+        b.createdAt.localeCompare(a.createdAt),
     )
+    .map((s) => ({
+      id: s.id,
+      customerId: s.customerId,
+      customerName: s.customerName,
+      email: s.email,
+      label: s.label,
+      status: s.status,
+      mrr: mrrOf(s.amounts, base, fx).total,
+    }))
+  return { options: options.slice(0, limit), total: libres.length, error }
+}
+
+/** Quién cobró en 12 meses, por `cus_`. Una hora, como la cartera. */
+const cachedChargeAccounts = unstable_cache(
+  () => listChargingCustomers(),
+  ["stripe-charge-accounts-v1"],
+  { revalidate: 3600, tags: ["stripe"] },
+)
+
+async function chargeAccountsOrNull(): Promise<{
+  list: ChargeAccount[]
+  error: string | null
+}> {
+  if (!stripeEnabled()) return { list: [], error: "Falta STRIPE_SECRET_KEY" }
+  try {
+    return { list: await cachedChargeAccounts(), error: null }
+  } catch (error) {
+    console.error("Stripe no respondió", error)
+    return { list: [], error: "Stripe no respondió" }
+  }
+}
+
+/**
+ * Cuentas de cobro que nadie tiene, las que más cobraron arriba. No se
+ * ofrecen las que ya se atribuyen solas por sus suscripciones: enlazarlas
+ * no cambiaría nada.
+ */
+export async function listChargeAccountOptions(query = "", limit = 25) {
+  const [{ list, error }, customerLinks, subscriptionLinks] = await Promise.all([
+    chargeAccountsOrNull(),
+    listCustomerLinks(),
+    listSubscriptionLinks(),
+  ])
+  const tomados = new Set(customerLinks.map((l) => l.stripeCustomerId))
+  const { byCustomer } = attribution(subscriptionLinks)
+  const plano = (s: string) =>
+    s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+  const q = plano(query.trim())
+  const libres = list.filter(
+    (a) =>
+      !tomados.has(a.id) &&
+      !byCustomer.has(a.id) &&
+      (!q ||
+        plano(a.name).includes(q) ||
+        plano(a.email ?? "").includes(q) ||
+        a.id.toLowerCase().includes(q)),
+  )
+  const options = libres.sort(
+    (a, b) =>
+      (b.lastAt ?? "").localeCompare(a.lastAt ?? "") || b.charges - a.charges,
+  )
   return { options: options.slice(0, limit), total: libres.length, error }
 }
 
@@ -474,19 +560,19 @@ export async function listFreeLocationOptions() {
 /* ----------------------------------------------------------------- vistas */
 
 export async function listClientRows(): Promise<ClientRow[]> {
-  const [clients, links, locationLinks, { list: stripe }, { options: locations }] =
+  const [clients, links, locationLinks, { list: portfolio }, { options: locations }] =
     await Promise.all([
       listClients(),
-      listStripeLinks(),
+      listSubscriptionLinks(),
       listLocationLinks(),
-      stripeCustomersOrNull(),
+      portfolioOrNull(),
       listLocationOptions(),
     ])
   const base = baseCurrency()
   const fx = usdToMxnRate()
-  const stripeById = new Map(stripe.map((c) => [c.id, c]))
+  const subById = new Map(portfolio.map((s) => [s.id, s]))
   const locationById = new Map(locations.map((l) => [l.id, l.name]))
-  const linksByClient = new Map<string, StripeLink[]>()
+  const linksByClient = new Map<string, SubscriptionLink[]>()
   for (const l of links) {
     linksByClient.set(l.clientId, [...(linksByClient.get(l.clientId) ?? []), l])
   }
@@ -502,18 +588,18 @@ export async function listClientRows(): Promise<ClientRow[]> {
   return clients.map((c) => {
     const mine = linksByClient.get(c.id) ?? []
     const subs = mine.flatMap(
-      (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
+      (l) => subById.get(l.stripeSubscriptionId)?.amounts ?? [],
     )
     const { total, unconverted } = mrrOf(subs, base, fx)
     const lines = mine.flatMap(
-      (l) => stripeById.get(l.stripeCustomerId)?.plan ?? [],
+      (l) => subById.get(l.stripeSubscriptionId)?.plan ?? [],
     )
     return {
       ...c,
       locationNames: (locationsByClient.get(c.id) ?? []).sort((a, b) =>
         a.localeCompare(b, "es"),
       ),
-      stripeCount: mine.length,
+      subscriptionCount: mine.length,
       mrr: total,
       unconvertedSubs: unconverted,
       account: resolveAccount(c, lines),
@@ -527,7 +613,15 @@ export async function getClientDetail(
   const client = await getClient(slug)
   if (!client) return undefined
 
-  const [opportunities, links, locationLinks, { list: stripe }, { options: locations }] =
+  const [
+    opportunities,
+    links,
+    locationLinks,
+    { list: portfolio },
+    { options: locations },
+    customerLinks,
+    { list: chargeAccounts },
+  ] =
     await Promise.all([
       db
         ? (db
@@ -540,31 +634,58 @@ export async function getClientDetail(
         : Promise.resolve(
             demo.clientOpportunities.filter((o) => o.clientId === client.id),
           ),
-      listStripeLinks(),
+      listSubscriptionLinks(),
       listLocationLinks(),
-      stripeCustomersOrNull(),
+      portfolioOrNull(),
       listLocationOptions(),
+      listCustomerLinks(),
+      chargeAccountsOrNull(),
     ])
   const base = baseCurrency()
   const fx = usdToMxnRate()
-  const stripeById = new Map(stripe.map((c) => [c.id, c]))
+  const subById = new Map(portfolio.map((s) => [s.id, s]))
+  const accountById = new Map(chargeAccounts.map((a) => [a.id, a]))
   const locationById = new Map(locations.map((l) => [l.id, l]))
   const mine = links.filter((l) => l.clientId === client.id)
-  const stripeRows = mine.map((l) => {
-    const c = stripeById.get(l.stripeCustomerId)
-    return {
-      ...l,
-      name: c?.name ?? l.stripeCustomerId,
-      email: c?.email ?? null,
-      active: (c?.subscriptions.length ?? 0) > 0,
-      mrr: c ? mrrOf(c.subscriptions, base, fx).total : null,
-      plan: c?.plan ?? [],
-    }
-  })
+  const subscriptionRows = mine
+    .map((l) => {
+      const s = subById.get(l.stripeSubscriptionId)
+      return {
+        ...l,
+        customerName: s?.customerName ?? l.stripeCustomerId,
+        email: s?.email ?? null,
+        label: s?.label ?? "Suscripción",
+        status: s?.status ?? null,
+        mrr: s ? mrrOf(s.amounts, base, fx).total : null,
+        plan: s?.plan ?? [],
+      }
+    })
+    // Las vivas arriba; entre ellas, la que más pesa.
+    .sort(
+      (a, b) =>
+        Number(b.status !== null && isLive(b.status)) -
+          Number(a.status !== null && isLive(a.status)) ||
+        (b.mrr ?? 0) - (a.mrr ?? 0),
+    )
   return {
     client,
     opportunities,
-    stripe: stripeRows,
+    subscriptions: subscriptionRows,
+    chargeAccounts: customerLinks
+      .filter((l) => l.clientId === client.id)
+      .map((l) => {
+        const a = accountById.get(l.stripeCustomerId)
+        return {
+          ...l,
+          name: a?.name ?? l.stripeCustomerId,
+          email: a?.email ?? null,
+          charges: a?.charges ?? 0,
+          recharges: a?.recharges ?? 0,
+          totals: a?.totals ?? {},
+          lastAt: a?.lastAt ?? null,
+        }
+      })
+      .sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? "")),
     locations: locationLinks
       .filter((l) => l.clientId === client.id)
       .map((l) => {
@@ -577,9 +698,7 @@ export async function getClientDetail(
       })
       .sort((a, b) => a.name.localeCompare(b.name, "es")),
     mrr: mrrOf(
-      mine.flatMap(
-        (l) => stripeById.get(l.stripeCustomerId)?.subscriptions ?? [],
-      ),
+      mine.flatMap((l) => subById.get(l.stripeSubscriptionId)?.amounts ?? []),
       base,
       fx,
     ).total,
@@ -646,18 +765,18 @@ async function neonInvoices(): Promise<{
  * de clientes, la entrada vieja deja de usarse sola.
  */
 const cachedStripeInvoices = unstable_cache(
-  async (usdToMxn: number | null, pares: [string, string][]) => {
-    const byCustomer = new Map(pares)
+  async (
+    usdToMxn: number | null,
+    links: SubscriptionLink[],
+    customerLinks: CustomerLink[],
+  ) => {
+    const { clientFor } = attribution(links, customerLinks)
     const raw = await listRecentInvoices(12)
     return raw
-      .map((invoice) =>
-        mapInvoice(invoice, usdToMxn, (cus) =>
-          cus ? (byCustomer.get(cus) ?? null) : null,
-        ),
-      )
+      .map((invoice) => mapInvoice(invoice, usdToMxn, clientFor))
       .filter((i): i is Invoice => i !== null)
   },
-  ["stripe-invoices"],
+  ["stripe-invoices-v3"],
   { revalidate: 300, tags: ["stripe"] },
 )
 
@@ -675,14 +794,23 @@ export async function getBillingFeed() {
     return { invoices, source, stale: false, usdToMxn, baseCurrency: base }
   }
 
-  // Un cliente puede tener varios cus_; cada uno apunta al mismo clientId.
-  const links = await listStripeLinks()
-  const pares = links
-    .map((l) => [l.stripeCustomerId, l.clientId] as [string, string])
-    .sort(([a], [b]) => a.localeCompare(b))
+  // Cada factura va con el dueño de su suscripción; la que no trae, con el
+  // de su `cus_` (ver `attribution`).
+  // Sin `linkedAt` y ordenados: la llave de la caché solo cambia cuando
+  // cambia a quién pertenece algo.
+  const [subscriptionLinks, customerLinks] = await Promise.all([
+    listSubscriptionLinks(),
+    listCustomerLinks(),
+  ])
+  const links = subscriptionLinks
+    .map((l) => ({ ...l, linkedAt: "" }))
+    .sort((a, b) => a.stripeSubscriptionId.localeCompare(b.stripeSubscriptionId))
+  const cuentas = customerLinks
+    .map((l) => ({ ...l, linkedAt: "" }))
+    .sort((a, b) => a.stripeCustomerId.localeCompare(b.stripeCustomerId))
 
   try {
-    const invoices = await cachedStripeInvoices(usdToMxn, pares)
+    const invoices = await cachedStripeInvoices(usdToMxn, links, cuentas)
     return {
       invoices,
       source: "stripe" as const,
@@ -738,7 +866,7 @@ const cachedCobranza = unstable_cache(
 )
 
 export type CobranzaRow = CobranzaItem & {
-  /** El cliente del panel, cuando el `cus_` está enlazado. */
+  /** El cliente del panel, cuando su suscripción está enlazada. */
   client: { name: string; slug: string } | null
 }
 
@@ -754,15 +882,16 @@ export type CobranzaFeed =
 export async function getCobranza(month: string): Promise<CobranzaFeed> {
   if (!stripeEnabled()) return { status: "off", month, rows: [], fetchedAt: null }
   try {
-    const [{ items, fetchedAt }, links, clients] = await Promise.all([
+    const [{ items, fetchedAt }, links, customerLinks, clients] = await Promise.all([
       cachedCobranza(month),
-      listStripeLinks(),
+      listSubscriptionLinks(),
+      listCustomerLinks(),
       listClients(),
     ])
-    const clientByCus = new Map(links.map((l) => [l.stripeCustomerId, l.clientId]))
+    const { clientFor } = attribution(links, customerLinks)
     const byId = new Map(clients.map((c) => [c.id, c]))
     const rows = items.map((item) => {
-      const clientId = item.customerId ? clientByCus.get(item.customerId) : undefined
+      const clientId = clientFor(item.subscriptionId, item.customerId)
       const c = clientId ? byId.get(clientId) : undefined
       return { ...item, client: c ? { name: c.name, slug: c.slug } : null }
     })
@@ -871,7 +1000,7 @@ export async function getPortfolioSummary() {
 
   const clients: Client[] = rows
   const active = rows.filter((c) => !c.orphaned)
-  // El MRR son las suscripciones activas de Stripe de los cus_ enlazados.
+  // El MRR son las suscripciones activas enlazadas a algún cliente.
   // Sin Stripe no hay fuente: cero y sin variación, en vez de una cifra de
   // ejemplo con aire de real.
   const mrr = active.reduce((sum, c) => sum + (c.mrr ?? 0), 0)
@@ -886,7 +1015,7 @@ export async function getPortfolioSummary() {
   const inFlight = implementations.filter((i) => i.stage !== "live")
   const blocked = implementations.filter((i) => i.blocked)
   const unlinked = active.filter(
-    (c) => c.stripeCount === 0 || c.locationNames.length === 0,
+    (c) => c.subscriptionCount === 0 || c.locationNames.length === 0,
   )
 
   return {
@@ -901,7 +1030,7 @@ export async function getPortfolioSummary() {
     outstanding,
     overdueCount,
     /** Para explicar de dónde sale cada cifra del tablero. */
-    stripeLinkCount: rows.reduce((sum, c) => sum + c.stripeCount, 0),
+    subscriptionLinkCount: rows.reduce((sum, c) => sum + c.subscriptionCount, 0),
     orphanedCount: rows.filter((c) => c.orphaned).length,
     unconvertedClients: rows.filter((c) => c.unconvertedSubs > 0).length,
     voidedInvoices: invoices.filter(

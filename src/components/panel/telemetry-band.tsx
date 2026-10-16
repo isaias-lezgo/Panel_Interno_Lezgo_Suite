@@ -79,7 +79,7 @@ export function TelemetryBand({
   unlinked,
   unlinkedNoStripe,
   unlinkedNoLocation,
-  stripeLinkCount,
+  subscriptionLinkCount,
   orphanedCount,
   unconvertedClients,
   voidedInvoices,
@@ -99,7 +99,7 @@ export function TelemetryBand({
   unlinked: number
   unlinkedNoStripe: number
   unlinkedNoLocation: number
-  stripeLinkCount: number
+  subscriptionLinkCount: number
   orphanedCount: number
   unconvertedClients: number
   voidedInvoices: number
@@ -112,7 +112,7 @@ export function TelemetryBand({
     itemsLabel: "Quién lo paga",
     itemsEmpty: "Ningún cliente enlazado tiene una suscripción activa.",
     source: stripeConnected
-      ? `Stripe — las suscripciones activas de los ${stripeLinkCount} clientes de Stripe enlazados.`
+      ? `Stripe — las activas entre las ${subscriptionLinkCount} suscripciones enlazadas a un cliente.`
       : "Nadie: falta STRIPE_SECRET_KEY, así que no hay suscripciones que sumar.",
     how: [
       "Cada suscripción se lleva a mes: una anual cuenta por su doceava parte.",
@@ -192,7 +192,7 @@ export function TelemetryBand({
     itemsEmpty: "Cada cliente activo tiene Stripe y subcuenta.",
     source: "El panel — clientes activos a los que les falta un enlace.",
     how: [
-      `${unlinkedNoStripe} sin cliente de Stripe: no se les puede atribuir ningún cobro.`,
+      `${unlinkedNoStripe} sin suscripción de Stripe: no se les puede atribuir ningún cobro.`,
       `${unlinkedNoLocation} sin subcuenta de GoHighLevel: no se sabe en qué location trabajan.`,
     ],
     excluded:

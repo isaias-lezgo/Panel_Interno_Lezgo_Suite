@@ -109,7 +109,7 @@ export function valuesOf(
     case "subcuenta":
       return c.locationNames.length ? c.locationNames : [NONE]
     case "stripe":
-      return [c.stripeCount > 0 ? "si" : NONE]
+      return [c.subscriptionCount > 0 ? "si" : NONE]
     case "cerrado":
       return [wonBucket(c.wonAt, now)]
   }

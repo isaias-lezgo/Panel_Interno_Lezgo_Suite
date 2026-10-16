@@ -9,7 +9,7 @@ import {
   lezgoSuiteEnabled,
   VENTAS_PIPELINE_ID,
 } from "@/lib/ghl/lezgo-suite"
-import { listCustomers, stripeEnabled } from "@/lib/stripe/client"
+import { listPortfolioSubscriptions, stripeEnabled } from "@/lib/stripe/client"
 
 import {
   groupWonOpportunities,
@@ -17,7 +17,9 @@ import {
   type WonOpportunity,
 } from "./group"
 import { autoLink, type LinkSubject, type LinkTarget } from "./match"
+import type { LinkedBy } from "@/lib/types"
 import { planUpserts } from "./plan"
+import { followCustomer } from "./subscriptions"
 
 const UNA_HORA = 60 * 60 * 1000
 
@@ -40,7 +42,7 @@ export type SyncResult =
       ok: true
       clients: number
       orphaned: number
-      stripeLinked: number
+      subscriptionsLinked: number
       locationsLinked: number
     }
   | { ok: false; error: string }
@@ -153,14 +155,14 @@ export async function syncClientsFromGhl(): Promise<SyncResult> {
         .where(inArray(schema.clients.id, orphanIds))
     }
 
-    const stripeLinked = await autoLinkStripe(upserts)
+    const subscriptionsLinked = await autoLinkStripe(upserts)
     const locationsLinked = await autoLinkLocations(upserts)
 
     return {
       ok: true,
       clients: upserts.length,
       orphaned: orphanIds.length,
-      stripeLinked,
+      subscriptionsLinked,
       locationsLinked,
     }
   } catch (error) {
@@ -174,35 +176,46 @@ export async function syncClientsFromGhl(): Promise<SyncResult> {
 }
 
 /**
- * Enlaza los `cus_` que nadie tiene, incluso a clientes que ya tienen otros:
- * varios clientes pagan con más de una cuenta de Stripe. Un `cus_` con fila
- * —enlazado o quitado a mano— no se vuelve a tocar.
+ * Enlaza las suscripciones que nadie tiene, en dos pasos. Primero, la que es
+ * de un `cus_` cuyas suscripciones ya son todas de un solo cliente: sigue a
+ * su dueño. Después, la que coincide por correo, teléfono o nombre exacto
+ * del `cus_` que la paga. Una suscripción con fila —enlazada o quitada a
+ * mano— no se vuelve a tocar.
  */
 async function autoLinkStripe(drafts: ClientDraft[]) {
   if (!db || !stripeEnabled()) return 0
-  const links = await db.select().from(schema.clientStripeCustomers)
-  const conHistoria = new Set(links.map((l) => l.stripeCustomerId))
+  const links = await db.select().from(schema.clientStripeSubscriptions)
+  const conHistoria = new Set(links.map((l) => l.stripeSubscriptionId))
+  const subs = await listPortfolioSubscriptions()
+  const customerOf = new Map(subs.map((s) => [s.id, s.customerId]))
+
+  const found = followCustomer(
+    links.map((l) => ({ ...l, linkedBy: l.linkedBy as LinkedBy })),
+    subs,
+  )
 
   const subjects = drafts.map(toSubject)
-  if (!subjects.length) return 0
+  if (subjects.length) {
+    const targets: LinkTarget[] = subs
+      .filter((s) => !conHistoria.has(s.id) && !found.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        name: s.customerName,
+        email: s.email,
+        phone: s.phone,
+      }))
+    for (const [sub, clientId] of autoLink(subjects, targets, "many")) {
+      found.set(sub, clientId)
+    }
+  }
 
-  const customers = await listCustomers()
-  const targets: LinkTarget[] = customers
-    .filter((c) => !conHistoria.has(c.id))
-    .map((c) => ({
-      id: c.id,
-      name: c.name ?? null,
-      email: c.email ?? null,
-      phone: c.phone ?? null,
-    }))
-
-  const found = autoLink(subjects, targets, "many")
   const now = new Date().toISOString()
-  for (const [cus, clientId] of found) {
+  for (const [sub, clientId] of found) {
     await db
-      .insert(schema.clientStripeCustomers)
+      .insert(schema.clientStripeSubscriptions)
       .values({
-        stripeCustomerId: cus,
+        stripeSubscriptionId: sub,
+        stripeCustomerId: customerOf.get(sub)!,
         clientId,
         linkedBy: "auto",
         linkedAt: now,

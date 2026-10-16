@@ -38,8 +38,8 @@ export type ClientAccount = {
 
 /**
  * Un cliente es un contacto de la subcuenta Lezgo Suite con al menos una
- * oportunidad ganada. Los enlaces viven aparte: a Stripe en `StripeLink`,
- * a sus subcuentas de GHL en `LocationLink`.
+ * oportunidad ganada. Los enlaces viven aparte: a sus suscripciones de
+ * Stripe en `SubscriptionLink`, a sus subcuentas de GHL en `LocationLink`.
  */
 export type Client = {
   /** Id del contacto en GHL. Agrupa sus oportunidades. */
@@ -81,11 +81,76 @@ export type ClientOpportunity = {
   updatedAt: string
 }
 
-export type StripeLink = {
+/**
+ * Una suscripción de Stripe enlazada a un cliente. El cliente se representa
+ * en Stripe por sus suscripciones, no por sus `cus_`: un mismo `cus_` puede
+ * pagar las de dos clientes (una agencia que paga por otros).
+ */
+export type SubscriptionLink = {
+  stripeSubscriptionId: string
+  /** El `cus_` que la paga, tal como estaba al enlazarla. */
   stripeCustomerId: string
   clientId: string
   linkedBy: LinkedBy
   linkedAt: string
+}
+
+/**
+ * Un `cus_` enlazado a mano como cuenta de cobro sin suscripción. No
+ * representa al cliente —eso lo hacen sus suscripciones— ni cuenta para el
+ * MRR: solo dice de quién son sus recargas, SPEI y cobros sueltos.
+ */
+export type CustomerLink = {
+  stripeCustomerId: string
+  clientId: string
+  linkedBy: LinkedBy
+  linkedAt: string
+}
+
+/** Un `cus_` con cobros en los últimos 12 meses, resumido. */
+export type ChargeAccount = {
+  id: string
+  name: string
+  email: string | null
+  /** Cobros exitosos y no reembolsados en 12 meses. */
+  charges: number
+  /** De esos, cuántos son recargas de wallet de GHL. */
+  recharges: number
+  /** Centavos por moneda. */
+  totals: Partial<Record<Currency, number>>
+  /** Último cobro, `YYYY-MM-DD` en GMT-6. */
+  lastAt: string | null
+}
+
+/** Estado de una suscripción tal cual lo nombra Stripe. */
+export type SubscriptionStatus =
+  | "active"
+  | "trialing"
+  | "past_due"
+  | "unpaid"
+  | "paused"
+  | "canceled"
+  | "incomplete"
+  | "incomplete_expired"
+
+/** Una suscripción de la cartera de Stripe, ya resumida para el panel. */
+export type PortfolioSubscription = {
+  id: string
+  customerId: string
+  /** Nombre del `cus_`; su correo o su id cuando no tiene nombre. */
+  customerName: string
+  email: string | null
+  phone: string | null
+  status: SubscriptionStatus
+  /** Lo que se cobra: los productos de sus líneas, el plan primero. */
+  label: string
+  /** Lo que vale al mes, por moneda. Vacío si no está activa. */
+  amounts: { amount: number; currency: Currency }[]
+  /** Sus líneas, solo si está activa: de ahí sale la cuenta del cliente. */
+  plan: PlanLine[]
+  /** Alta, `YYYY-MM-DD` en GMT-6. */
+  createdAt: string
+  canceledAt: string | null
 }
 
 export type LocationLink = {
@@ -103,7 +168,8 @@ export type LocationLink = {
 export type ClientRow = Client & {
   /** Nombres de sus subcuentas enlazadas; vacío si no tiene ninguna. */
   locationNames: string[]
-  stripeCount: number
+  /** Suscripciones de Stripe enlazadas, vivas o no. */
+  subscriptionCount: number
   /** Centavos en la moneda base; `null` si no hay nada que sumar. */
   mrr: number | null
   /** Suscripciones activas que no se pudieron convertir a la moneda base. */
@@ -112,11 +178,13 @@ export type ClientRow = Client & {
   account: ClientAccount
 }
 
-export type StripeCustomerOption = {
+export type SubscriptionOption = {
   id: string
-  name: string
+  customerId: string
+  customerName: string
   email: string | null
-  active: boolean
+  label: string
+  status: SubscriptionStatus
   mrr: number | null
 }
 
@@ -129,14 +197,18 @@ export type LocationOption = {
 export type ClientDetail = {
   client: Client
   opportunities: ClientOpportunity[]
-  stripe: (StripeLink & {
-    name: string
+  subscriptions: (SubscriptionLink & {
+    customerName: string
     email: string | null
-    active: boolean
+    label: string
+    /** `null` si Stripe no la devolvió: borrada o Stripe sin conectar. */
+    status: SubscriptionStatus | null
     mrr: number | null
-    /** Sus líneas de suscripción activas, tal como las cobra Stripe. */
+    /** Sus líneas activas, tal como las cobra Stripe. */
     plan: PlanLine[]
   })[]
+  /** Cuentas de cobro sin suscripción: atribuyen cobros, no suman MRR. */
+  chargeAccounts: (CustomerLink & Omit<ChargeAccount, "id">)[]
   locations: (LocationLink & { name: string; email: string | null })[]
   mrr: number | null
 }
@@ -200,6 +272,13 @@ export type ImplementationNote = {
   body: string
   /** ISO con zona. */
   createdAt: string
+  images: NoteImage[]
+}
+
+/** `src` es la ruta del panel que la sirve, o un `blob:` mientras se guarda. */
+export type NoteImage = {
+  id: string
+  src: string
 }
 
 export type Implementation = ImplementationRow & {

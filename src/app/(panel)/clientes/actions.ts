@@ -6,8 +6,11 @@ import { z } from "zod"
 
 import { db, schema } from "@/db"
 import { syncClientsFromGhl, type SyncResult } from "@/lib/clients/sync"
-import { listStripeCustomerOptions } from "@/lib/repository"
-import type { StripeCustomerOption } from "@/lib/types"
+import {
+  listChargeAccountOptions,
+  listSubscriptionOptions,
+} from "@/lib/repository"
+import type { ChargeAccount, SubscriptionOption } from "@/lib/types"
 
 type Result = { ok: true } | { ok: false; error: string }
 
@@ -27,18 +30,101 @@ export async function syncClients(): Promise<SyncResult> {
 }
 
 /**
- * Busca en los clientes de Stripe libres. La lista completa pasa de mil, así
- * que el desplegable pregunta por lo que se escribe en vez de cargarla toda.
+ * Busca en las suscripciones libres de la cartera. Son cientos, así que el
+ * desplegable pregunta por lo que se escribe en vez de cargarlas todas.
  */
-export async function searchStripeCustomers(
+export async function searchStripeSubscriptions(
   query: string,
-): Promise<StripeCustomerOption[]> {
-  const { options } = await listStripeCustomerOptions(query)
+): Promise<SubscriptionOption[]> {
+  const { options } = await listSubscriptionOptions(query)
   return options
 }
 
-/** Un cus_ tiene un solo dueño: si ya está enlazado, se dice a quién. */
-export async function linkStripeCustomer(
+/**
+ * Una suscripción tiene un solo dueño: si ya está enlazada, se dice a quién.
+ * El `cus_` se toma de la cartera, no del navegador.
+ */
+export async function linkStripeSubscription(
+  clientId: string,
+  subscriptionId: string,
+): Promise<Result> {
+  if (!db) return { ok: false, error: NO_DB }
+  if (!/^sub_[A-Za-z0-9]+$/.test(subscriptionId)) {
+    return { ok: false, error: "Id de suscripción inválido." }
+  }
+  const [taken] = await db
+    .select({
+      clientId: schema.clientStripeSubscriptions.clientId,
+      linkedBy: schema.clientStripeSubscriptions.linkedBy,
+      customerId: schema.clientStripeSubscriptions.stripeCustomerId,
+      name: schema.clients.name,
+    })
+    .from(schema.clientStripeSubscriptions)
+    .innerJoin(
+      schema.clients,
+      eq(schema.clients.id, schema.clientStripeSubscriptions.clientId),
+    )
+    .where(eq(schema.clientStripeSubscriptions.stripeSubscriptionId, subscriptionId))
+  if (taken && taken.linkedBy !== "excluded" && taken.clientId !== clientId) {
+    return { ok: false, error: `Ya está enlazada a ${taken.name}.` }
+  }
+
+  let customerId: string | null = taken?.customerId ?? null
+  if (!customerId) {
+    const { options } = await listSubscriptionOptions(subscriptionId, 1)
+    customerId = options.find((o) => o.id === subscriptionId)?.customerId ?? null
+  }
+  if (!customerId) {
+    return { ok: false, error: "Esa suscripción no está en la cartera de Stripe." }
+  }
+
+  // Una fila archivada se revive: la suscripción vuelve, ahora a quien la eligió.
+  const fila = {
+    stripeSubscriptionId: subscriptionId,
+    stripeCustomerId: customerId,
+    clientId,
+    linkedBy: "manual" as const,
+    linkedAt: new Date().toISOString(),
+  }
+  await db
+    .insert(schema.clientStripeSubscriptions)
+    .values(fila)
+    .onConflictDoUpdate({
+      target: schema.clientStripeSubscriptions.stripeSubscriptionId,
+      set: fila,
+    })
+  refresh()
+  return { ok: true }
+}
+
+/**
+ * No borra la fila: la archiva. Quitar un enlace es una decisión, y la
+ * siguiente sincronización volvería a proponer la misma suscripción si no
+ * queda constancia de que ya se descartó.
+ */
+export async function unlinkStripeSubscription(
+  subscriptionId: string,
+): Promise<Result> {
+  if (!db) return { ok: false, error: NO_DB }
+  await db
+    .update(schema.clientStripeSubscriptions)
+    .set({ linkedBy: "excluded" })
+    .where(eq(schema.clientStripeSubscriptions.stripeSubscriptionId, subscriptionId))
+  refresh()
+  return { ok: true }
+}
+
+/** Busca entre los `cus_` con cobros que nadie tiene. */
+export async function searchChargeAccounts(query: string): Promise<ChargeAccount[]> {
+  const { options } = await listChargeAccountOptions(query)
+  return options
+}
+
+/**
+ * Enlaza un `cus_` como cuenta de cobro sin suscripción: sus recargas, SPEI
+ * y cobros sueltos pasan a ser del cliente. Un `cus_` tiene un solo dueño.
+ */
+export async function linkChargeAccount(
   clientId: string,
   customerId: string,
 ): Promise<Result> {
@@ -59,9 +145,8 @@ export async function linkStripeCustomer(
     )
     .where(eq(schema.clientStripeCustomers.stripeCustomerId, customerId))
   if (taken && taken.linkedBy !== "excluded" && taken.clientId !== clientId) {
-    return { ok: false, error: `Ya está enlazado a ${taken.name}.` }
+    return { ok: false, error: `Ya es cuenta de cobro de ${taken.name}.` }
   }
-  // Una fila archivada se revive: el cus_ vuelve, ahora a quien lo eligió.
   const fila = {
     stripeCustomerId: customerId,
     clientId,
@@ -79,12 +164,8 @@ export async function linkStripeCustomer(
   return { ok: true }
 }
 
-/**
- * No borra la fila: la archiva. Quitar un enlace es una decisión, y la
- * siguiente sincronización volvería a proponer el mismo `cus_` si no queda
- * constancia de que ya se descartó.
- */
-export async function unlinkStripeCustomer(customerId: string): Promise<Result> {
+/** Archiva, no borra, igual que los demás enlaces. */
+export async function unlinkChargeAccount(customerId: string): Promise<Result> {
   if (!db) return { ok: false, error: NO_DB }
   await db
     .update(schema.clientStripeCustomers)

@@ -55,6 +55,11 @@ function mainLineDescription(invoice: Stripe.Invoice): string | null {
   return best?.description ?? null
 }
 
+function subscriptionOf(invoice: Stripe.Invoice) {
+  const sub = invoice.parent?.subscription_details?.subscription
+  return typeof sub === "string" ? sub : (sub?.id ?? null)
+}
+
 export function toMxn(
   amount: number,
   currency: Currency,
@@ -72,7 +77,11 @@ export function toMxn(
 export function mapInvoice(
   invoice: Stripe.Invoice,
   usdToMxn: number | null,
-  clientIdFor: (customerId: string | null) => string | null,
+  /** Dueño de la factura: por su suscripción y, si no trae, por su `cus_`. */
+  clientIdFor: (
+    subscriptionId: string | null,
+    customerId: string | null,
+  ) => string | null,
   now = new Date(),
 ): Invoice | null {
   const currency = toCurrency(invoice.currency)
@@ -88,7 +97,7 @@ export function mapInvoice(
   return {
     id: invoice.id,
     number: invoice.number ?? invoice.id,
-    clientId: clientIdFor(customerId),
+    clientId: clientIdFor(subscriptionOf(invoice), customerId),
     customerName:
       invoice.customer_name ?? invoice.customer_email ?? "Sin nombre",
     amount: invoice.total,

@@ -25,8 +25,10 @@ import {
   listLocationLinks,
   listLocationOptions,
   listPendings,
-  listStripeCustomerOptions,
-  listStripeLinks,
+  listChargeAccountOptions,
+  listCustomerLinks,
+  listSubscriptionLinks,
+  listSubscriptionOptions,
 } from "@/lib/repository"
 import type {
   ClientRow,
@@ -36,8 +38,8 @@ import type {
 } from "@/lib/types"
 
 /**
- * Lo que el copiloto puede leer del panel: clientes con sus enlaces a
- * Stripe y a GHL, implementaciones, pendientes, facturas, series y la
+ * Lo que el copiloto puede leer del panel: clientes con sus suscripciones
+ * de Stripe y sus subcuentas de GHL, implementaciones, pendientes, facturas, series y la
  * configuración de Lezgo IA. Todo pasa por el repositorio, igual que las
  * páginas, así que el copiloto ve exactamente lo que ve el equipo.
  *
@@ -78,7 +80,7 @@ function clientSummary(c: ClientRow) {
     wonAt: c.wonAt,
     orphaned: c.orphaned,
     subaccounts: c.locationNames,
-    stripeCustomers: c.stripeCount,
+    stripeSubscriptions: c.subscriptionCount,
     mrr: c.mrr,
     unconvertedSubs: c.unconvertedSubs,
     account: c.account,
@@ -160,7 +162,7 @@ export const panelTools = {
         mrr: s.mrr,
         activeClients: s.activeCount,
         orphanedClients: s.orphanedCount,
-        stripeLinks: s.stripeLinkCount,
+        stripeSubscriptionLinks: s.subscriptionLinkCount,
         clientsWithUnconvertedSubs: s.unconvertedClients,
         outstanding: s.outstanding,
         overdueInvoices: s.overdueCount,
@@ -172,7 +174,7 @@ export const panelTools = {
         unlinkedClients: s.unlinked.map((c) => ({
           name: c.name,
           slug: c.slug,
-          missingStripe: c.stripeCount === 0,
+          missingStripe: c.subscriptionCount === 0,
           missingSubaccount: c.locationNames.length === 0,
         })),
       }
@@ -181,7 +183,7 @@ export const panelTools = {
 
   findClients: tool({
     description:
-      "Search panel clients (won deals in the Lezgo Suite 'Ventas' pipeline). Each row carries its linked GHL sub-accounts, number of Stripe customers, MRR and the four account fields (membership, billing period, license due date, technical support) with the source of each value.",
+      "Search panel clients (won deals in the Lezgo Suite 'Ventas' pipeline). Each row carries its linked GHL sub-accounts, number of linked Stripe subscriptions, MRR and the four account fields (membership, billing period, license due date, technical support) with the source of each value.",
     inputSchema: z.object({
       query: z
         .string()
@@ -216,7 +218,7 @@ export const panelTools = {
             (!s || plano(c.stage).includes(s)) &&
             (!membership || c.account.membership.value === membership) &&
             (!missingLink ||
-              (missingLink !== "subaccount" && c.stripeCount === 0) ||
+              (missingLink !== "subaccount" && c.subscriptionCount === 0) ||
               (missingLink !== "stripe" && c.locationNames.length === 0)),
         )
         .map(clientSummary)
@@ -225,7 +227,7 @@ export const panelTools = {
 
   getClient: tool({
     description:
-      "Full file of one client: account fields, won opportunities, linked Stripe customers (cus_ ids with their active subscription lines and MRR), linked GHL sub-accounts (ids and names), implementations, open pendings of their sub-accounts and their invoices.",
+      "Full file of one client: account fields, won opportunities, linked Stripe subscriptions (sub_ id, paying cus_, status, product lines and MRR), charge accounts (cus_ linked only to attribute wallet recharges, SPEI and loose charges; they do not add to MRR), linked GHL sub-accounts (ids and names), implementations, open pendings of their sub-accounts and their invoices.",
     inputSchema: z.object({
       client: z
         .string()
@@ -264,14 +266,25 @@ export const panelTools = {
           valueMxn: o.monetaryValue,
           wonAt: o.wonAt,
         })),
-        stripe: detail.stripe.map((s) => ({
+        subscriptions: detail.subscriptions.map((s) => ({
+          subscriptionId: s.stripeSubscriptionId,
           customerId: s.stripeCustomerId,
-          name: s.name,
+          customerName: s.customerName,
           email: s.email,
+          product: s.label,
+          status: s.status,
           linkedBy: s.linkedBy,
-          active: s.active,
           mrr: s.mrr,
-          subscriptionLines: s.plan,
+          lines: s.plan,
+        })),
+        chargeAccounts: detail.chargeAccounts.map((a) => ({
+          customerId: a.stripeCustomerId,
+          name: a.name,
+          chargesLast12Months: a.charges,
+          recharges: a.recharges,
+          totals: a.totals,
+          lastChargeAt: a.lastAt,
+          linkedBy: a.linkedBy,
         })),
         subaccounts: detail.locations.map((l) => ({
           id: l.ghlLocationId,
@@ -311,9 +324,9 @@ export const panelTools = {
 
   listLinks: tool({
     description:
-      "Client ↔ GHL sub-account and client ↔ Stripe customer associations. Also lists sub-accounts nobody owns and Stripe customers linked to no client (paying ones first).",
+      "Client ↔ GHL sub-account, client ↔ Stripe subscription and client ↔ charge account (cus_ for recharges and loose charges) associations. With unlinkedOnly, lists what nobody owns: sub-accounts, subscriptions (live first) or cus_ with charges in the last 12 months.",
     inputSchema: z.object({
-      kind: z.enum(["subaccounts", "stripe"]),
+      kind: z.enum(["subaccounts", "stripe", "chargeAccounts"]),
       unlinkedOnly: z
         .boolean()
         .optional()
@@ -321,7 +334,7 @@ export const panelTools = {
       query: z
         .string()
         .optional()
-        .describe("Filters Stripe customers by name, email or cus_ id."),
+        .describe("Filters Stripe subscriptions by customer name, email, product, sub_ or cus_ id."),
     }),
     execute: async ({ kind, unlinkedOnly, query }) => {
       const rows = await listClientRows()
@@ -347,16 +360,32 @@ export const panelTools = {
           })),
         }
       }
+      if (kind === "chargeAccounts") {
+        if (unlinkedOnly) {
+          const { options, total, error } = await listChargeAccountOptions(query ?? "", 40)
+          return { error, total, shown: options.length, free: options }
+        }
+        const links = await listCustomerLinks()
+        return {
+          links: links.map((l) => ({
+            customerId: l.stripeCustomerId,
+            client: clientName.get(l.clientId) ?? l.clientId,
+            linkedBy: l.linkedBy,
+            linkedAt: l.linkedAt,
+          })),
+        }
+      }
       if (unlinkedOnly) {
-        const { options, total, error } = await listStripeCustomerOptions(
+        const { options, total, error } = await listSubscriptionOptions(
           query ?? "",
           40,
         )
         return { error, total, shown: options.length, free: options }
       }
-      const links = await listStripeLinks()
+      const links = await listSubscriptionLinks()
       return {
         links: links.map((l) => ({
+          subscriptionId: l.stripeSubscriptionId,
           customerId: l.stripeCustomerId,
           client: clientName.get(l.clientId) ?? l.clientId,
           linkedBy: l.linkedBy,
@@ -479,7 +508,7 @@ export const panelTools = {
       unlinkedOnly: z
         .boolean()
         .optional()
-        .describe("Only invoices whose Stripe customer is linked to no client."),
+        .describe("Only invoices that could not be attributed to a client (their subscription is not linked)."),
       since: z.string().optional().describe("YYYY-MM-DD, by issue date."),
       limit: z.number().int().min(1).max(200).optional(),
     }),

@@ -32,7 +32,7 @@ export const columnLabel: Record<ColumnKey, string> = {
   periodicidad: "Periodicidad",
   vencimiento: "Vencimiento",
   subcuenta: "Subcuenta GHL",
-  stripe: "Stripe",
+  stripe: "Suscripciones",
   mrr: "MRR",
   cerrado: "Cerrado",
 }
@@ -50,7 +50,7 @@ export const columnOrder: ColumnKey[] = [
   "cerrado",
 ]
 
-/** Lo que se ve al llegar: todo menos Stripe y Cerrado, que caben peor. */
+/** Lo que se ve al llegar: todo menos Suscripciones y Cerrado, que caben peor. */
 export const defaultColumns: ColumnKey[] = [
   "etapa",
   "membresia",

@@ -88,8 +88,8 @@ export default async function TableroPage() {
       title: c.name,
       client: c.contactName,
       detail:
-        c.stripeCount === 0
-          ? "Sin cliente de Stripe."
+        c.subscriptionCount === 0
+          ? "Sin suscripción de Stripe."
           : "Sin subcuenta de GoHighLevel.",
       href: `/clientes/${c.slug}`,
     })),
@@ -183,10 +183,10 @@ export default async function TableroPage() {
     id: c.id,
     title: c.name,
     meta:
-      c.stripeCount === 0 && c.locationNames.length === 0
-        ? "Sin cliente de Stripe ni subcuenta."
-        : c.stripeCount === 0
-          ? "Sin cliente de Stripe."
+      c.subscriptionCount === 0 && c.locationNames.length === 0
+        ? "Sin suscripción de Stripe ni subcuenta."
+        : c.subscriptionCount === 0
+          ? "Sin suscripción de Stripe."
           : "Sin subcuenta de GoHighLevel.",
     href: `/clientes/${c.slug}`,
   }))
@@ -215,12 +215,12 @@ export default async function TableroPage() {
           overdueCount={summary.overdueCount}
           unlinked={summary.unlinked.length}
           unlinkedNoStripe={
-            summary.unlinked.filter((c) => c.stripeCount === 0).length
+            summary.unlinked.filter((c) => c.subscriptionCount === 0).length
           }
           unlinkedNoLocation={
             summary.unlinked.filter((c) => c.locationNames.length === 0).length
           }
-          stripeLinkCount={summary.stripeLinkCount}
+          subscriptionLinkCount={summary.subscriptionLinkCount}
           orphanedCount={summary.orphanedCount}
           unconvertedClients={summary.unconvertedClients}
           voidedInvoices={summary.voidedInvoices}

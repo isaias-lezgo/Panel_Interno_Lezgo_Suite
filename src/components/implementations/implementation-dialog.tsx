@@ -23,9 +23,12 @@ import { CSS } from "@dnd-kit/utilities"
 import {
   CornerDownRightIcon,
   GripVerticalIcon,
+  ImagePlusIcon,
   PlusIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
+import { upload } from "@vercel/blob/client"
 
 import {
   addChecklistItem,
@@ -66,6 +69,12 @@ import {
 } from "@/components/ui/dialog"
 import { stampDate, stampDateTime } from "@/lib/format"
 import { checklistProgress } from "@/lib/implementations/checklist"
+import {
+  NOTE_IMAGE_MAX_COUNT,
+  NOTE_IMAGE_TYPES,
+  noteImageFolder,
+  noteImageProblem,
+} from "@/lib/implementations/note-images"
 import type {
   ChecklistItem,
   Implementation,
@@ -720,9 +729,13 @@ type NoteEdit =
   | { type: "add"; note: ImplementationNote }
   | { type: "delete"; id: string }
 
+/** Imagen adjunta que aún no se sube: se sube al guardar la nota. */
+type Attachment = { id: string; file: File; preview: string }
+
 /**
- * Notas rápidas: texto libre con fecha, la más reciente arriba. No se
- * editan; se borran y se escriben de nuevo.
+ * Notas rápidas: texto libre con fecha, la más reciente arriba, y si hace
+ * falta imágenes (pegadas, arrastradas o elegidas). No se editan; se borran
+ * y se escriben de nuevo.
  */
 function QuickNotes({
   implementationId,
@@ -734,6 +747,9 @@ function QuickNotes({
   const [, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [value, setValue] = useState("")
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
   const [list, edit] = useOptimistic(notes, (current, e: NoteEdit) =>
     e.type === "add"
       ? [e.note, ...current]
@@ -747,22 +763,89 @@ function QuickNotes({
       setError(r.ok ? null : r.error)
     })
 
+  const attach = (files: Iterable<File>) => {
+    const next: Attachment[] = []
+    let problem: string | null = null
+    for (const file of files) {
+      const why = noteImageProblem(file)
+      if (why) {
+        problem = why
+        continue
+      }
+      next.push({
+        id: crypto.randomUUID(),
+        file,
+        preview: URL.createObjectURL(file),
+      })
+    }
+    const room = NOTE_IMAGE_MAX_COUNT - attachments.length
+    if (next.length > room) {
+      next.splice(room).forEach((a) => URL.revokeObjectURL(a.preview))
+      problem = `Una nota lleva hasta ${NOTE_IMAGE_MAX_COUNT} imágenes.`
+    }
+    setError(problem)
+    if (next.length) setAttachments((current) => [...current, ...next])
+  }
+
+  const detach = (id: string) =>
+    setAttachments((current) => {
+      const gone = current.find((a) => a.id === id)
+      if (gone) URL.revokeObjectURL(gone.preview)
+      return current.filter((a) => a.id !== id)
+    })
+
   const submit = () => {
     const body = value.trim()
-    if (!body) return
+    const sending = attachments
+    if (!body && sending.length === 0) return
     setValue("")
-    run(
-      {
+    setAttachments([])
+    start(async () => {
+      edit({
         type: "add",
         note: {
           id: `draft_${crypto.randomUUID()}`,
           body,
           createdAt: new Date().toISOString(),
+          images: sending.map((a) => ({ id: a.id, src: a.preview })),
         },
-      },
-      () => addNote(implementationId, body),
-    )
+      })
+      let r: Done
+      try {
+        const uploaded = await Promise.all(
+          sending.map((a) =>
+            upload(
+              `${noteImageFolder(implementationId)}${blobName(a.file)}`,
+              a.file,
+              {
+                access: "private",
+                handleUploadUrl: "/api/notas/subir",
+                clientPayload: implementationId,
+              },
+            ),
+          ),
+        )
+        r = await addNote(
+          implementationId,
+          body,
+          uploaded.map((b) => b.pathname),
+        )
+      } catch {
+        r = { ok: false, error: "No se pudo subir una de las imágenes." }
+      }
+      if (r.ok) {
+        sending.forEach((a) => URL.revokeObjectURL(a.preview))
+        setError(null)
+      } else {
+        // Se devuelve lo escrito para no perderlo.
+        setValue((current) => current || body)
+        setAttachments((current) => [...sending, ...current])
+        setError(r.error)
+      }
+    })
   }
+
+  const canSave = Boolean(value.trim()) || attachments.length > 0
 
   return (
     <section
@@ -777,19 +860,45 @@ function QuickNotes({
       </div>
 
       <form
-        className="space-y-2 border-b border-border p-3"
+        className={cn(
+          "space-y-2 border-b border-border p-3 transition-colors",
+          dragging && "bg-accent/60",
+        )}
         onSubmit={(e) => {
           e.preventDefault()
           submit()
         }}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDragging(false)
+          }
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return
+          e.preventDefault()
+          setDragging(false)
+          attach(e.dataTransfer.files)
+        }}
       >
         <Textarea
           aria-label="Nueva nota"
-          placeholder="Escribe una nota…"
+          placeholder="Escribe una nota o pega una imagen…"
           value={value}
           maxLength={2000}
           rows={3}
           onChange={(e) => setValue(e.target.value)}
+          onPaste={(e) => {
+            const files = [...e.clipboardData.files]
+            if (files.length === 0) return
+            // Una captura trae solo el archivo; si también hay texto, se pega.
+            if (!e.clipboardData.getData("text/plain")) e.preventDefault()
+            attach(files)
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault()
@@ -798,16 +907,59 @@ function QuickNotes({
           }}
           className="min-h-20 resize-none text-sm"
         />
+        {attachments.length > 0 && (
+          <ul aria-label="Imágenes por guardar" className="flex flex-wrap gap-2">
+            {attachments.map((a) => (
+              <li key={a.id} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element -- vista previa local (blob:) */}
+                <img
+                  src={a.preview}
+                  alt={a.file.name}
+                  className="size-14 rounded-md border border-border object-cover"
+                />
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="secondary"
+                  aria-label={`Quitar ${a.file.name}`}
+                  className="absolute -top-1.5 -right-1.5 rounded-full shadow-sm"
+                  onClick={() => detach(a.id)}
+                >
+                  <XIcon />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">
-            <kbd>⌘</kbd> <kbd>Enter</kbd> para guardar
-          </span>
-          <Button
-            type="submit"
-            size="sm"
-            variant="outline"
-            disabled={!value.trim()}
-          >
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Adjuntar imagen"
+              title="Adjuntar imagen"
+              disabled={attachments.length >= NOTE_IMAGE_MAX_COUNT}
+              onClick={() => fileInput.current?.click()}
+            >
+              <ImagePlusIcon />
+            </Button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept={NOTE_IMAGE_TYPES.join(",")}
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) attach(e.target.files)
+                e.target.value = ""
+              }}
+            />
+            <span className="text-xs text-muted-foreground">
+              <kbd>⌘</kbd> <kbd>Enter</kbd> para guardar
+            </span>
+          </div>
+          <Button type="submit" size="sm" variant="outline" disabled={!canSave}>
             <PlusIcon aria-hidden />
             Guardar nota
           </Button>
@@ -835,7 +987,11 @@ function QuickNotes({
                       dateTime={note.createdAt}
                       className="num text-xs text-muted-foreground"
                     >
-                      {isDraft ? "Guardando…" : stampDateTime(note.createdAt)}
+                      {isDraft
+                        ? note.images.length
+                          ? "Subiendo…"
+                          : "Guardando…"
+                        : stampDateTime(note.createdAt)}
                     </time>
                     <Button
                       size="icon-xs"
@@ -852,9 +1008,37 @@ function QuickNotes({
                       <Trash2Icon />
                     </Button>
                   </div>
-                  <p className="mt-1 text-sm leading-snug break-words whitespace-pre-wrap">
-                    {note.body}
-                  </p>
+                  {note.body && (
+                    <p className="mt-1 text-sm leading-snug break-words whitespace-pre-wrap">
+                      {note.body}
+                    </p>
+                  )}
+                  {note.images.length > 0 && (
+                    <ul className="mt-2 flex flex-wrap gap-2">
+                      {note.images.map((image, i) => (
+                        <li key={image.id}>
+                          <a
+                            href={isDraft ? undefined : image.src}
+                            target="_blank"
+                            rel="noopener"
+                            aria-label={`Abrir imagen ${i + 1} en otra pestaña`}
+                            className="block rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element -- se sirve detrás del candado */}
+                            <img
+                              src={image.src}
+                              alt=""
+                              loading="lazy"
+                              className={cn(
+                                "size-20 rounded-md border border-border object-cover",
+                                isDraft && "opacity-60",
+                              )}
+                            />
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               )
             })}
@@ -863,6 +1047,19 @@ function QuickNotes({
       </div>
     </section>
   )
+}
+
+/** Nombre del archivo en Blob: sin espacios ni acentos. Blob le agrega sufijo. */
+function blobName(file: File) {
+  const ext = file.type.split("/")[1]?.replace("jpeg", "jpg") ?? "img"
+  const base =
+    file.name
+      .replace(/\.[^.]+$/, "")
+      .normalize("NFD")
+      .replace(/[^\w-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "imagen"
+  return `${base}.${ext}`
 }
 
 /** Junto a la X del diálogo. Borrar pide confirmación: no se puede deshacer. */

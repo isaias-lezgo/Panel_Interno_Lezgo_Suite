@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
+import { ChargeAccountLinks } from "@/components/clients/charge-account-links"
 import { LocationLinks } from "@/components/clients/location-link"
-import { StripeLinks } from "@/components/clients/stripe-links"
+import { SubscriptionLinks } from "@/components/clients/subscription-links"
 import { LinkButton } from "@/components/panel/link-button"
 import {
   EmptyState,
@@ -32,7 +33,8 @@ import {
   listImplementations,
   listInvoices,
   listFreeLocationOptions,
-  listStripeCustomerOptions,
+  listChargeAccountOptions,
+  listSubscriptionOptions,
 } from "@/lib/repository"
 
 export async function generateMetadata({
@@ -53,15 +55,23 @@ export default async function ClientePage({
   const { slug } = await params
   const detail = await getClientDetail(slug)
   if (!detail) notFound()
-  const { client, opportunities, stripe, locations, mrr } = detail
+  const { client, opportunities, subscriptions, chargeAccounts, locations, mrr } =
+    detail
 
-  const [implementations, invoices, activity, stripeOptions, locationOptions] =
-    await Promise.all([
+  const [
+    implementations,
+    invoices,
+    activity,
+    subscriptionOptions,
+    locationOptions,
+    chargeOptions,
+  ] = await Promise.all([
       listImplementations(),
       listInvoices(),
       listActivity(40),
-      listStripeCustomerOptions(),
+      listSubscriptionOptions(),
       listFreeLocationOptions(),
+      listChargeAccountOptions(),
     ])
   const currency = baseCurrency()
 
@@ -105,7 +115,7 @@ export default async function ClientePage({
               {mrr === null ? "—" : money(mrr, currency)}
             </span>
             <span className="block text-xs text-muted-foreground">
-              suscripciones activas en Stripe
+              suscripciones activas enlazadas
             </span>
           </Fact>
           <Fact label="Contacto">
@@ -148,19 +158,41 @@ export default async function ClientePage({
           </Instrument>
 
           <Instrument
-            label="Clientes de Stripe"
-            hint={stripe.length ? `${stripe.length} enlazados` : "Pendiente de enlazar"}
+            label="Suscripciones de Stripe"
+            hint={
+              subscriptions.length
+                ? `${subscriptions.length} ${subscriptions.length === 1 ? "enlazada" : "enlazadas"}`
+                : "Pendiente de enlazar"
+            }
           >
-            <StripeLinks
+            <SubscriptionLinks
               clientId={client.id}
-              links={stripe}
-              options={stripeOptions.options}
-              optionsTotal={stripeOptions.total}
-              optionsError={stripeOptions.error}
+              links={subscriptions}
+              options={subscriptionOptions.options}
+              optionsTotal={subscriptionOptions.total}
+              optionsError={subscriptionOptions.error}
               currency={currency}
             />
           </Instrument>
         </div>
+
+        <Instrument
+          label="Cuentas de cobro sin suscripción"
+          hint={
+            chargeAccounts.length
+              ? `${chargeAccounts.length} · recargas, SPEI y cobros sueltos; no suman MRR`
+              : "Recargas, SPEI y cobros sueltos; no suman MRR"
+          }
+        >
+          <ChargeAccountLinks
+            clientId={client.id}
+            links={chargeAccounts}
+            options={chargeOptions.options}
+            optionsTotal={chargeOptions.total}
+            optionsError={chargeOptions.error}
+            currency={currency}
+          />
+        </Instrument>
 
         <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
           <Instrument

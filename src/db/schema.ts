@@ -54,6 +54,29 @@ export const clientOpportunities = pgTable("client_opportunities", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 })
 
+/**
+ * El enlace con Stripe: cada suscripción de la cartera tiene un solo dueño,
+ * y un cliente tiene las que sean. `stripe_customer_id` es la foto del `cus_`
+ * que la paga: con él se atribuyen los cobros que no traen suscripción
+ * (recargas, SPEI) cuando todas las suscripciones de ese `cus_` son del mismo
+ * cliente. Quitar un enlace lo archiva (`excluded`).
+ */
+export const clientStripeSubscriptions = pgTable("client_stripe_subscriptions", {
+  stripeSubscriptionId: text("stripe_subscription_id").primaryKey(),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  linkedBy: text("linked_by").notNull(),
+  linkedAt: timestamp("linked_at", { withTimezone: true, mode: "string" }).notNull(),
+})
+
+/**
+ * Cuentas de cobro sin suscripción: un `cus_` enlazado a mano para que sus
+ * recargas de wallet, SPEI y cobros sueltos sean del cliente. No representa
+ * al cliente ni suma MRR; eso lo hacen sus suscripciones. La sync no la
+ * llena. Quitar un enlace lo archiva (`excluded`).
+ */
 export const clientStripeCustomers = pgTable("client_stripe_customers", {
   stripeCustomerId: text("stripe_customer_id").primaryKey(),
   clientId: text("client_id")
@@ -135,6 +158,22 @@ export const implementationNotes = pgTable("implementation_notes", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .notNull()
     .defaultNow(),
+})
+
+/**
+ * Imágenes de una nota rápida. El archivo vive en Vercel Blob (privado) bajo
+ * `notas/<implementación>/…`; aquí solo su `pathname`. Se sirven por
+ * `/api/notas/imagen/<id>`, detrás del candado del panel.
+ */
+export const implementationNoteImages = pgTable("implementation_note_images", {
+  id: text("id").primaryKey(),
+  noteId: text("note_id")
+    .notNull()
+    .references(() => implementationNotes.id, { onDelete: "cascade" }),
+  pathname: text("pathname").notNull(),
+  contentType: text("content_type").notNull(),
+  size: integer("size").notNull(),
+  position: integer("position").notNull(),
 })
 
 /** Contactos de la subcuenta Lezgo Suite ligados a una implementación. */

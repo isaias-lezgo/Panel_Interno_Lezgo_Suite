@@ -94,7 +94,7 @@ export function ClientsTable({
   const base = useMemo(() => {
     const q = query.trim().toLowerCase()
     return clients.filter((c) => {
-      if (filter === "sin_enlazar" && c.stripeCount > 0 && c.locationNames.length > 0) {
+      if (filter === "sin_enlazar" && c.subscriptionCount > 0 && c.locationNames.length > 0) {
         return false
       }
       if (filter === "huerfanos" && !c.orphaned) return false
@@ -333,10 +333,10 @@ export function ClientsTable({
 
                   {visible.has("stripe") && (
                     <TableCell className="text-sm whitespace-nowrap">
-                      {c.stripeCount > 0 ? (
+                      {c.subscriptionCount > 0 ? (
                         <span className="num">
-                          {c.stripeCount}{" "}
-                          {c.stripeCount === 1 ? "enlazado" : "enlazados"}
+                          {c.subscriptionCount}{" "}
+                          {c.subscriptionCount === 1 ? "suscripción" : "suscripciones"}
                         </span>
                       ) : (
                         <StatusChip tone="warn">Sin enlazar</StatusChip>

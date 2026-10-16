@@ -34,7 +34,7 @@ const fila = (extra: Partial<ClientRow> = {}): ClientRow => ({
   billingPeriod: null,
   membership: null,
   locationNames: [],
-  stripeCount: 0,
+  subscriptionCount: 0,
   mrr: null,
   unconvertedSubs: 0,
   account: {
@@ -61,7 +61,7 @@ const todas = new Set<ClientColumn>([
 const growth = fila({
   id: "g",
   mrr: 400_000,
-  stripeCount: 1,
+  subscriptionCount: 1,
   locationNames: ["Imagine", "Imagine 2"],
   account: {
     ...fila().account,

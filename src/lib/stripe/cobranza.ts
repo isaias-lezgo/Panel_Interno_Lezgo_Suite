@@ -44,6 +44,8 @@ export type CobranzaItem = {
   id: string
   section: CobranzaSection
   customerId: string | null
+  /** La suscripción de la que sale, si sale de una: con ella se atribuye. */
+  subscriptionId: string | null
   customerName: string
   customerEmail: string | null
   /** Qué se cobra: producto, concepto de la factura o del cargo. */
@@ -123,6 +125,11 @@ export function subAccountName(description: string | null) {
   return m ? m[1].trim() : null
 }
 
+/** La suscripción que generó la factura, si la generó una. */
+export function invoiceSubscription(invoice: Stripe.Invoice) {
+  return idOf(invoice.parent?.subscription_details?.subscription)
+}
+
 /** La línea de mayor importe: Stripe a veces devuelve primero la del IVA. */
 function mainLine(invoice: Stripe.Invoice) {
   let best: Stripe.InvoiceLineItem | null = null
@@ -182,6 +189,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
         id: `${s.id}:${si.id}`,
         section: "failed",
         ...who(idOf(s.customer)),
+        subscriptionId: s.id,
         concept: itemLabel(si, input.products),
         ref: s.id,
         amount: itemAmount(si),
@@ -211,6 +219,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
       id: inv.id,
       section: "open",
       ...who(idOf(inv.customer), { name: inv.customer_name, email: inv.customer_email }),
+      subscriptionId: invoiceSubscription(inv),
       concept: mainLine(inv) ?? "Factura",
       ref: `${folio} · ${due}`,
       amount: inv.amount_remaining || inv.amount_due,
@@ -232,6 +241,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
       id: inv.id,
       section: "draft",
       ...who(idOf(inv.customer), { name: inv.customer_name, email: inv.customer_email }),
+      subscriptionId: invoiceSubscription(inv),
       concept: mainLine(inv) ?? "Factura en borrador",
       ref: inv.id,
       amount: inv.amount_due,
@@ -257,6 +267,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
         name: charge?.billing_details?.name ?? null,
         email: charge?.billing_details?.email ?? null,
       }),
+      subscriptionId: null,
       concept: charge?.description || "Reembolso",
       ref: r.id,
       amount: r.amount,
@@ -283,6 +294,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
         name: charge?.billing_details?.name ?? null,
         email: charge?.billing_details?.email ?? null,
       }),
+      subscriptionId: null,
       concept: `Contracargo: ${d.reason.replaceAll("_", " ")}`,
       ref: d.id,
       amount: d.amount,
@@ -305,10 +317,13 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
     if (pi && input.invoiceIntents.has(pi)) continue
     const currency = toCurrency(ch.currency)
     if (!currency) continue
-    const base = who(idOf(ch.customer), {
-      name: ch.billing_details?.name ?? null,
-      email: ch.billing_details?.email ?? null,
-    })
+    const base = {
+      ...who(idOf(ch.customer), {
+        name: ch.billing_details?.name ?? null,
+        email: ch.billing_details?.email ?? null,
+      }),
+      subscriptionId: null,
+    }
 
     if (isRecharge(ch)) {
       const manual = (ch.description ?? "").toLowerCase().includes("manual recharge")
@@ -369,6 +384,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
       id: inv.id,
       section: "paid",
       ...who(idOf(inv.customer), { name: inv.customer_name, email: inv.customer_email }),
+      subscriptionId: invoiceSubscription(inv),
       concept: mainLine(inv) ?? "Suscripción cobrada",
       ref: inv.number ? `Factura ${inv.number}` : inv.id,
       amount: inv.amount_paid,
@@ -396,6 +412,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
           id: `${s.id}:${si.id}:pausa`,
           section: "paused",
           ...who(idOf(s.customer)),
+          subscriptionId: s.id,
           concept: itemLabel(si, input.products),
           ref: `En pausa · ${s.id}`,
           amount: itemAmount(si),
@@ -421,6 +438,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
         id: `${s.id}:${si.id}`,
         section: "renewals",
         ...who(idOf(s.customer)),
+        subscriptionId: s.id,
         concept: itemLabel(si, input.products),
         ref: si.id,
         amount: itemAmount(si),
@@ -458,6 +476,7 @@ export function buildCobranza(input: CobranzaInput): CobranzaItem[] {
       id: sch.id,
       section: "scheduled",
       ...who(idOf(sch.customer)),
+      subscriptionId: idOf(sch.subscription),
       concept: names.length ? names.join(" + ") : "Suscripción programada",
       ref: sch.id,
       amount: priced ? amount : null,

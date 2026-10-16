@@ -21,7 +21,7 @@ export default async function ClientesPage() {
   const active = rows.filter((r) => !r.orphaned)
   const mrr = active.reduce((s, r) => s + (r.mrr ?? 0), 0)
   const unlinked = active.filter(
-    (r) => r.stripeCount === 0 || r.locationNames.length === 0,
+    (r) => r.subscriptionCount === 0 || r.locationNames.length === 0,
   ).length
 
   const hint = [
@@ -43,7 +43,7 @@ export default async function ClientesPage() {
       <PageHeader
         eyebrow="Cartera"
         title="Clientes"
-        description="Cada oportunidad ganada en Lezgo Suite, agrupada por contacto, con su subcuenta y sus clientes de Stripe."
+        description="Cada oportunidad ganada en Lezgo Suite, agrupada por contacto, con su subcuenta y sus suscripciones de Stripe."
         actions={
           <SyncButton action={syncClients} disabled={!lezgoSuiteEnabled()} />
         }

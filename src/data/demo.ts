@@ -6,7 +6,7 @@ import type {
   InvoiceRow,
   LocationLink,
   Pending,
-  StripeLink,
+  SubscriptionLink,
 } from "@/lib/types"
 import type { PendingOwner } from "@/lib/pendings/owners"
 
@@ -73,9 +73,10 @@ export const clientOpportunities: ClientOpportunity[] = clients.map((c) => ({
   updatedAt: synced,
 }))
 
-export const stripeLinks: StripeLink[] = [
-  { stripeCustomerId: "cus_demo_northgate", clientId: "cl_northgate", linkedBy: "auto", linkedAt: synced },
-  { stripeCustomerId: "cus_demo_veloz", clientId: "cl_veloz", linkedBy: "manual", linkedAt: synced },
+export const subscriptionLinks: SubscriptionLink[] = [
+  { stripeSubscriptionId: "sub_demo_northgate", stripeCustomerId: "cus_demo_northgate", clientId: "cl_northgate", linkedBy: "auto", linkedAt: synced },
+  { stripeSubscriptionId: "sub_demo_northgate_extra", stripeCustomerId: "cus_demo_northgate", clientId: "cl_northgate", linkedBy: "auto", linkedAt: synced },
+  { stripeSubscriptionId: "sub_demo_veloz", stripeCustomerId: "cus_demo_veloz", clientId: "cl_veloz", linkedBy: "manual", linkedAt: synced },
 ]
 
 export const locationLinks: LocationLink[] = [

@@ -25,6 +25,7 @@
     "@hookform/resolvers": "^5.9.1",
     "@neondatabase/serverless": "^1.1.0",
     "@tanstack/react-table": "^9.1.2",
+    "@vercel/blob": "^2.8.2",
     "ai": "^7.0.66",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
