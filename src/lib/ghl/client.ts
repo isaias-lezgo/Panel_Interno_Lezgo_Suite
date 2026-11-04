@@ -26,6 +26,15 @@ export class GhlError extends Error {
   }
 }
 
+/**
+ * Lo que puede salir bien al reintentar: un fallo de red (no llega a ser
+ * `GhlError`), un 429 o un 5xx. Un 401 o un 404 seguirán igual hasta que
+ * alguien cambie algo.
+ */
+export function isTransientGhlError(error: unknown) {
+  return !(error instanceof GhlError) || error.status === 429 || error.status >= 500
+}
+
 export type GhlContact = {
   id: string
   locationId?: string
@@ -76,6 +85,8 @@ export type GhlOpportunity = {
   createdAt?: string
   updatedAt?: string
   lastStatusChangeAt?: string | null
+  /** Cuándo entró a su etapa actual. */
+  lastStageChangeAt?: string | null
   /** Solo lo devuelve `GET /opportunities/search`. */
   contact?: {
     id: string
@@ -119,6 +130,25 @@ export type GhlPipeline = {
   id: string
   name: string
   stages: { id: string; name: string; position: number }[]
+}
+
+/** Lo que trae `GET /conversations/search`: un resumen, no los mensajes. */
+export type GhlConversation = {
+  id: string
+  contactId: string
+  /** Epoch en milisegundos. */
+  lastMessageDate?: number
+  lastMessageDirection?: "inbound" | "outbound"
+  lastMessageType?: string
+}
+
+export type GhlMessage = {
+  id: string
+  direction: "inbound" | "outbound"
+  messageType?: string
+  dateAdded: string
+  source?: string
+  userId?: string
 }
 
 type RequestOptions = {
@@ -388,9 +418,14 @@ export class GhlClient {
 
   /* ----------------------------------------------------- conversations & ops */
 
+  /**
+   * Con `conversationProviderId` sale por un proveedor propio (p. ej. el
+   * WhatsApp de GoGHL) aunque el `type` diga "SMS".
+   */
   sendMessage(input: {
     contactId: string
     type: "SMS" | "Email"
+    conversationProviderId?: string
     message?: string
     subject?: string
     html?: string
@@ -398,6 +433,27 @@ export class GhlClient {
     return this.request<{ conversationId: string; messageId: string }>(
       "/conversations/messages",
       { method: "POST", body: input },
+    )
+  }
+
+  searchConversations(params: { locationId?: string; contactId?: string; limit?: number }) {
+    return this.request<{ conversations: GhlConversation[]; total: number }>(
+      "/conversations/search",
+      {
+        query: {
+          locationId: this.locationOrThrow(params.locationId),
+          contactId: params.contactId,
+          limit: params.limit ?? 20,
+        },
+      },
+    )
+  }
+
+  /** Los más recientes primero. */
+  listMessages(conversationId: string, limit = 20) {
+    return this.request<{ messages: { messages: GhlMessage[]; nextPage?: boolean } }>(
+      `/conversations/${conversationId}/messages`,
+      { query: { limit } },
     )
   }
 

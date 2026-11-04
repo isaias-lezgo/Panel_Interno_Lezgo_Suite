@@ -1,7 +1,7 @@
 import "server-only"
 
 import { unstable_cache, updateTag } from "next/cache"
-import { asc, desc, eq, inArray, max, ne } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, max, ne } from "drizzle-orm"
 
 import * as demo from "@/data/demo"
 import { db, schema } from "@/db"
@@ -11,6 +11,7 @@ import {
   GhlClient,
   GhlError,
   ghl,
+  isTransientGhlError,
   type GhlContact,
   type GhlUser,
 } from "@/lib/ghl/client"
@@ -55,6 +56,7 @@ import {
 import { resolveAccount } from "@/lib/clients/account"
 import { attribution, isLive } from "@/lib/clients/subscriptions"
 import { noteImageSrc } from "@/lib/implementations/note-images"
+import { createLimiter, mapLimit } from "@/lib/map-limit"
 import { mapInvoice, toMxn } from "@/lib/stripe/map"
 import type {
   ActivityEvent,
@@ -1058,59 +1060,71 @@ function isLezgoStaff(user: GhlUser) {
   )
 }
 
-const cachedLezgoIaAccounts = unstable_cache(
-  async (links: { locationId: string; clientName: string }[]) => {
-    const all = await ghl.listAllLocations()
-    const byId = new Map(all.map((l) => [l.id, l]))
-    let failed = 0
-    const inactive: string[] = []
-    const subaccounts = await Promise.all(
-      links.map(async ({ locationId, clientName }) => {
-        const location = byId.get(locationId)
-        if (!location?.companyId) {
-          failed++
-          return null
-        }
-        try {
-          const { users } = await ghl.searchUsers({
-            companyId: location.companyId,
-            locationId,
-          })
-          const live = await readLocationPipeline(
-            locationId,
-            advisorUsers(users, isLezgoStaff).map((u) => u.id),
-          )
-          return toSubaccount({
-            location,
-            users,
-            clientName,
-            isStaff: isLezgoStaff,
-            ...live,
-          })
-        } catch (error) {
-          // Una subcuenta suspendida o cancelada en GHL no es una falla: se
-          // declara por nombre y no ensucia la consola.
-          if (isInactiveLocation(error)) {
-            inactive.push(location.name ?? clientName ?? locationId)
-            return null
-          }
-          console.error(`GHL no devolvió usuarios de ${locationId}`, error)
-          failed++
-          return null
-        }
-      }),
-    )
-    return {
-      subaccounts: subaccounts
-        .filter((s) => s !== null)
-        .sort((a, b) => a.name.localeCompare(b.name, "es")),
-      failed,
-      inactive: inactive.sort((a, b) => a.localeCompare(b, "es")),
-    }
-  },
-  ["lezgo-ia-accounts-v4"],
+/**
+ * Topes de la carga de Lezgo IA, que hace una llamada por asesor: unas 360
+ * con la cartera actual. Dan como máximo 6 × (4 + 1) = 30 a la vez, y
+ * `mapLimit` explica por qué sin tope se caen. El de subcuentas va dentro de
+ * la función cacheada: `unstable_cache` revalida en segundo plano las entradas
+ * viejas, y ahí un tope por fuera no alcanza.
+ */
+const subaccountSlot = createLimiter(6)
+const ADVISORS_AT_ONCE = 4
+
+/**
+ * Solo lo que usa la subcuenta: esto viaja en los argumentos de la caché, y
+ * `unstable_cache` los escribe en el log cuando una revalidación falla.
+ */
+const cachedLezgoIaLocations = unstable_cache(
+  async () =>
+    (await ghl.listAllLocations()).flatMap(({ id, companyId, name, city, timezone }) =>
+      companyId ? [{ id, companyId, name, city, timezone }] : [],
+    ),
+  ["lezgo-ia-locations"],
   { revalidate: 3600, tags: ["ghl-locations", "lezgo-ia"] },
 )
+
+type LezgoIaLink = {
+  location: Awaited<ReturnType<typeof cachedLezgoIaLocations>>[number]
+  clientName: string
+}
+
+/**
+ * Una entrada de caché por subcuenta. Lo que se lanza no se guarda: la que
+ * falla se reintenta en la siguiente carga sin releer las demás y, si ya tenía
+ * una entrada, la conserva. La llave no ve `readLezgoIaSubaccount`: si cambia
+ * lo que devuelve, sube el `-v1`.
+ */
+const cachedLezgoIaSubaccount = unstable_cache(
+  (link: LezgoIaLink) => subaccountSlot(() => readLezgoIaSubaccount(link)),
+  ["lezgo-ia-subaccount-v1"],
+  { revalidate: 3600, tags: ["ghl-locations", "lezgo-ia"] },
+)
+
+async function readLezgoIaSubaccount({ location, clientName }: LezgoIaLink) {
+  try {
+    const { users } = await ghl.searchUsers({
+      companyId: location.companyId,
+      locationId: location.id,
+    })
+    const live = await readLocationPipeline(
+      location.id,
+      advisorUsers(users, isLezgoStaff).map((u) => u.id),
+    )
+    const subaccount = toSubaccount({
+      location,
+      users,
+      clientName,
+      isStaff: isLezgoStaff,
+      ...live,
+    })
+    return { kind: "live" as const, subaccount }
+  } catch (error) {
+    // Una subcuenta suspendida o cancelada en GHL no es una falla: se
+    // declara por nombre y no ensucia la consola.
+    if (isInactiveLocation(error)) return { kind: "inactive" as const, name: location.name }
+    throw error
+  }
+}
 
 /** GHL responde "The location is not active" a una subcuenta desactivada. */
 function isInactiveLocation(error: unknown) {
@@ -1121,7 +1135,8 @@ function isInactiveLocation(error: unknown) {
  * Lo que solo la app OAuth puede leer de una subcuenta: sus pipelines y
  * cuántas oportunidades abiertas tiene cada asesor (`meta.total` con
  * `limit=1`, una llamada por asesor). Si la app no está o no llega a la
- * subcuenta, `null`: la vista lo declara en vez de mostrar ceros.
+ * subcuenta, `null`: la vista lo declara en vez de mostrar ceros. Un fallo
+ * pasajero se lanza: como `null` se quedaría una hora en la caché, sin aviso.
  */
 async function readLocationPipeline(locationId: string, advisorIds: string[]) {
   if (!oauthConfigured()) return { pipelines: null, openLeads: null }
@@ -1129,25 +1144,24 @@ async function readLocationPipeline(locationId: string, advisorIds: string[]) {
     const client = new GhlClient(await locationToken(locationId), locationId)
     const [{ pipelines }, counts] = await Promise.all([
       client.listPipelines(locationId),
-      Promise.all(
-        advisorIds.map(async (id) => {
-          const r = await client.request<{ meta?: { total?: number } }>(
-            "/opportunities/search",
-            {
-              query: {
-                location_id: locationId,
-                assigned_to: id,
-                status: "open",
-                limit: 1,
-              },
+      mapLimit(advisorIds, ADVISORS_AT_ONCE, async (id) => {
+        const r = await client.request<{ meta?: { total?: number } }>(
+          "/opportunities/search",
+          {
+            query: {
+              location_id: locationId,
+              assigned_to: id,
+              status: "open",
+              limit: 1,
             },
-          )
-          return [id, r.meta?.total ?? 0] as const
-        }),
-      ),
+          },
+        )
+        return [id, r.meta?.total ?? 0] as const
+      }),
     ])
     return { pipelines, openLeads: Object.fromEntries(counts) }
   } catch (error) {
+    if (isTransientGhlError(error)) throw error
     console.error(`La app OAuth no leyó ${locationId}`, error)
     return { pipelines: null, openLeads: null }
   }
@@ -1178,16 +1192,32 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
       .from(schema.clients),
   ])
   const clientById = new Map(clients.map((c) => [c.id, c.name]))
-  const input = links
-    .map((l) => ({
-      locationId: l.ghlLocationId,
-      clientName: clientById.get(l.clientId) ?? "",
-    }))
-    .sort((a, b) => a.locationId.localeCompare(b.locationId))
 
   try {
-    const { subaccounts, failed, inactive } =
-      await cachedLezgoIaAccounts(input)
+    const locations = await cachedLezgoIaLocations()
+    const byId = new Map(locations.map((l) => [l.id, l]))
+    const reads = await Promise.all(
+      links.map(async (link) => {
+        const location = byId.get(link.ghlLocationId)
+        if (!location) return null
+        try {
+          return await cachedLezgoIaSubaccount({
+            location,
+            clientName: clientById.get(link.clientId) ?? "",
+          })
+        } catch (error) {
+          console.error(`GHL no devolvió ${link.ghlLocationId}`, error)
+          return null
+        }
+      }),
+    )
+    const failed = reads.filter((r) => r === null).length
+    const inactive = reads
+      .flatMap((r) => (r?.kind === "inactive" ? [r.name] : []))
+      .sort((a, b) => a.localeCompare(b, "es"))
+    const subaccounts = reads
+      .flatMap((r) => (r?.kind === "live" ? [r.subaccount] : []))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"))
     // La configuración no pasa por la caché de GHL: lo guardado se ve al instante.
     const configs = await getLezgoIaConfigs(
       subaccounts.map((s) => ({ locationId: s.id, timezone: s.timezone })),
@@ -1263,4 +1293,27 @@ export async function getLezgoIaConfig(
 ): Promise<AccountConfig> {
   const configs = await getLezgoIaConfigs([{ locationId, timezone }])
   return configs.get(locationId) ?? defaultAccountConfig(locationId, timezone)
+}
+
+/**
+ * Cuáles de estos avisos ya salieron (`status = "sent"`) en una corrida
+ * anterior del motor de Lezgo IA. Lo fallido o simulado no cuenta: se
+ * vuelve a intentar.
+ */
+export async function getSentNotificationKeys(
+  locationId: string,
+  keys: string[],
+): Promise<Set<string>> {
+  if (!db || keys.length === 0) return new Set()
+  const rows = await db
+    .selectDistinct({ key: schema.lezgoIaNotifications.key })
+    .from(schema.lezgoIaNotifications)
+    .where(
+      and(
+        eq(schema.lezgoIaNotifications.ghlLocationId, locationId),
+        eq(schema.lezgoIaNotifications.status, "sent"),
+        inArray(schema.lezgoIaNotifications.key, keys),
+      ),
+    )
+  return new Set(rows.map((r) => r.key))
 }

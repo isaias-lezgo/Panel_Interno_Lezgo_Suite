@@ -88,6 +88,7 @@ src/
     ai/tools.ts         Herramientas de GHL del copiloto
     ai/panel-tools.ts   Lecturas del panel para el copiloto
     time.ts             Zona horaria del panel (GMT-6): día, mes y formato
+    map-limit.ts        Promise.all con tope de llamadas simultáneas
     format.ts nav.ts types.ts utils.ts
   db/                   Esquema Drizzle, conexión, reintento y seed
   data/                 Datos de ejemplo (demo.ts, lezgo-ia.ts)
@@ -154,6 +155,20 @@ tipos. Detalles ya verificados contra la API real:
   secret.
 - `GET /opportunities/search` filtra por asesor con `assigned_to` y
   `status=open`; con `limit=1`, `meta.total` es el conteo.
+- **Las lecturas en lote a GHL llevan tope** (`src/lib/map-limit.ts`). El `fetch`
+  de Node no limita conexiones por host y la carga de Lezgo IA son unas 360
+  llamadas: sin tope, una carga real perdió 19 de 33 subcuentas con
+  `UND_ERR_CONNECT_TIMEOUT`. Con cientos a la vez, conectar pasa de los 250 ms
+  que Node da a cada dirección y el intento puede acabar en una IPv6 sin ruta
+  (desde el Mac de desarrollo, `curl -6` a GHL no conecta).
+- **Un fallo pasajero de GHL no se guarda.** `unstable_cache` guarda lo que se
+  devuelve, no lo que se lanza, y si hay una entrada vieja la sigue sirviendo.
+  Por eso Lezgo IA tiene una entrada por subcuenta: un fallo de red, 429 o 5xx
+  (`isTransientGhlError`) se lanza, suma a `failed` y se reintenta en la
+  siguiente carga sin releer las demás. Un 401 o 403 de la app sí se guarda como
+  "sin pipelines". El tope va dentro de la función cacheada porque las entradas
+  viejas se revalidan en segundo plano, fuera de cualquier tope por fuera de la
+  caché.
 
 **Stripe.** Toda llamada pasa por `src/lib/stripe/client.ts`, y es **solo
 lectura**: el panel no cobra ni emite. Detalles verificados contra la cuenta
@@ -277,10 +292,10 @@ igual que Stripe: la sync solo propone una a quien no tiene ninguna, el resto
 se agrega a mano en la ficha, y quitar un enlace lo archiva (`excluded`). Un
 `sub_` o una subcuenta que ya tiene dueño no se ofrece a otro.
 
-El panel escribe poco y **siempre a Neon (y a Blob), nunca a GHL**. Son cuatro cosas: los
+El panel escribe poco y **a Neon (y a Blob)**. Son cuatro cosas: los
 enlaces (suscripción de Stripe y subcuenta), las cuatro columnas de cuenta que se
 editan en la tabla, las implementaciones con su checklist y sus notas, y los
-pendientes.
+pendientes. La única escritura a GHL son los WhatsApp del motor de Lezgo IA.
 
 **Cuenta del cliente.** La tabla lleva cuatro columnas que se editan en la
 propia celda —membresía, servicio técnico, periodicidad y vencimiento de
@@ -315,6 +330,29 @@ cada asesor, reglas por etapa, fuera de oficina) se guarda en
 motor de la IA la lee con `getLezgoIaConfig()` y decide con
 `shouldNotify()` de `src/lib/lezgo-ia/config.ts`: código determinista, sin
 gastar tokens en releer reglas. Sin GHL o Neon, la vista usa `src/data/lezgo-ia.ts`.
+
+**Motor de Lezgo IA** (`src/lib/lezgo-ia/engine.ts` + `run.ts`). Por ahora
+lo dispara a mano "Correr motor ahora" en la configuración de una subcuenta;
+el botón no decide nada, solo corre el motor. Lee las oportunidades abiertas
+y la conversación de cada contacto con la app OAuth, detecta avisos (lead
+nuevo sin primer contacto, lead que dejó de contestar, propuesta de
+perdido, etapa sin movimiento según su regla, resumen al gerente), los pasa
+por `shouldNotify` y junta un WhatsApp por destinatario. "Gerente" son los
+admins de la subcuenta. Cada aviso que sale queda en
+`lezgo_ia_notifications` con una `key` estable, y lo que ya tiene un
+renglón `sent` no se repite (el interruptor "Repetir avisos ya enviados" lo
+salta para probar). Lo diferido por horario no se anota: se vuelve a
+detectar en la siguiente corrida. Tope de 10 mensajes por corrida.
+
+Los avisos salen por **WhatsApp desde la subcuenta Lezgo Suite** con la app
+de GoGHL ("Whatsapp, iMessage and SMS", proveedor "WhatsApp QR"):
+`sendWhatsApp()` en `src/lib/ghl/lezgo-suite.ts` manda `type: "SMS"` con
+ese `conversationProviderId` y antepone `{WA#2}` (el 442 931 5445). La
+etiqueta va siempre: GoGHL recuerda en el tag `wa:` del contacto el último
+número usado. `type: "WhatsApp"` es el canal oficial de Meta, otro número.
+**Todavía no se le escribe a nadie real**: con `LEZGO_IA_TEST_CONTACT_ID`
+todo llega a ese contacto con el destinatario real en el encabezado; sin
+ella la corrida es simulada.
 
 **Modelo.** `src/lib/ai/agent.ts` resuelve el modelo por dos caminos: con
 `ANTHROPIC_API_KEY` habla directo con Anthropic; sin ella usa el AI Gateway con
@@ -368,7 +406,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 15 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, hora, reintento y sesión
+pnpm test         # vitest, 18 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
@@ -395,6 +433,7 @@ devuelven un error explicado en la interfaz.
 | `STRIPE_SECRET_KEY` | Clave de Stripe. Sin ella, facturación sigue en Neon/demo |
 | `STRIPE_FX_USD_MXN` | Tipo de cambio USD→MXN para normalizar los KPI |
 | `BLOB_READ_WRITE_TOKEN` | Blob privado de las imágenes de las notas. Lo pone Vercel al conectar el store |
+| `LEZGO_IA_TEST_CONTACT_ID` | Contacto de Lezgo Suite al que llegan todos los avisos del motor en pruebas. Vacía = simulado |
 | `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados

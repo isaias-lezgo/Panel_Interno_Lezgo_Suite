@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm"
 
 import { db, schema } from "@/db"
 import { saveAccountInput, type SaveAccountInput } from "@/lib/lezgo-ia/config"
+import { runLezgoIa, type RunResult } from "@/lib/lezgo-ia/run"
 import { listLocationLinks } from "@/lib/repository"
 
 type Done = { ok: true } | { ok: false; error: string }
@@ -87,4 +88,25 @@ export async function saveLezgoIaAccount(raw: SaveAccountInput): Promise<Done> {
 
   refresh()
   return { ok: true }
+}
+
+/**
+ * Corre el motor de Lezgo IA sobre una subcuenta, ahora, con la
+ * configuración guardada. `repeat` vuelve a mandar avisos que ya salieron:
+ * sirve para probar el mismo caso con otra configuración.
+ */
+export async function runLezgoIaNow(
+  locationId: string,
+  options: { repeat?: boolean } = {},
+): Promise<RunResult> {
+  const links = await listLocationLinks()
+  if (!links.some((l) => l.ghlLocationId === locationId)) {
+    return { ok: false, error: "Esa subcuenta no está enlazada a ningún cliente." }
+  }
+  try {
+    return await runLezgoIa(locationId, { repeat: options.repeat === true })
+  } catch (error) {
+    console.error("El motor de Lezgo IA falló", error)
+    return { ok: false, error: "El motor falló a la mitad. Revisa la bitácora antes de repetir." }
+  }
 }

@@ -266,6 +266,7 @@ export type NotifyDecision =
         | "ajuste-apagado"
         | "dia-no-laborable"
         | "horario-de-silencio"
+        | "sin-gerente"
       /** Cuando la razón es de horario: se junta y sale después. */
       deferred: boolean
     }
@@ -275,12 +276,13 @@ export type NotifyDecision =
  * IA de la subcuenta, avisos del asesor, el ajuste en sí, fuera de oficina
  * (se desvía a quien cubre), días laborables y horario de silencio. Lo que
  * cae fuera de horario no se pierde: `deferred` le dice al motor que lo
- * encole.
+ * encole. `settingId` en `null` es un aviso que no cuelga de un ajuste —las
+ * reglas por etapa—: solo pasa por los filtros de persona y de horario.
  */
 export function shouldNotify(input: {
   account: AccountConfig
   userId: string
-  settingId: string
+  settingId: string | null
   at: Date
 }): NotifyDecision {
   const { account, settingId, at } = input
@@ -300,8 +302,8 @@ export function shouldNotify(input: {
   if (userId !== "manager" && !advisor.alerts) {
     return { send: false, reason: "avisos-apagados", deferred: false }
   }
-  const setting = advisor.settings[settingId]
-  if (settingDefs.get(settingId)?.control !== "fixed" && !setting?.enabled) {
+  const setting = settingId ? advisor.settings[settingId] : undefined
+  if (settingId && settingDefs.get(settingId)?.control !== "fixed" && !setting?.enabled) {
     return { send: false, reason: "ajuste-apagado", deferred: false }
   }
 

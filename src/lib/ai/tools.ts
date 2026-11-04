@@ -4,13 +4,8 @@ import { tool } from "ai"
 import { z } from "zod"
 
 import { panelTools } from "@/lib/ai/panel-tools"
-import { ghl, GhlClient, GhlError } from "@/lib/ghl/client"
-import {
-  LEZGO_SUITE_LOCATION_ID,
-  lezgoSuite,
-  lezgoSuiteEnabled,
-} from "@/lib/ghl/lezgo-suite"
-import { locationToken, oauthConfigured } from "@/lib/ghl/oauth"
+import { ghl, GhlError } from "@/lib/ghl/client"
+import { ghlFor } from "@/lib/ghl/for-location"
 import { listClients, listLocationLinks } from "@/lib/repository"
 
 /**
@@ -27,24 +22,6 @@ const locationId = z
   .describe(
     "GoHighLevel sub-account id. Omit to use the default location. Pass it whenever you know it: it picks the token that can read that sub-account.",
   )
-
-/**
- * El token de agencia lista subcuentas pero da 401 al leer sus contactos y
- * oportunidades. Lezgo Suite tiene su token propio; las demás, el de la app
- * OAuth. Si la app no llega, se intenta con el de agencia y el error de GHL
- * vuelve al modelo tal cual.
- */
-async function ghlFor(id = process.env.GHL_LOCATION_ID): Promise<GhlClient> {
-  if (!id) return ghl
-  if (id === LEZGO_SUITE_LOCATION_ID && lezgoSuiteEnabled()) return lezgoSuite
-  if (!oauthConfigured()) return ghl
-  try {
-    return new GhlClient(await locationToken(id), id)
-  } catch (error) {
-    console.error(`Sin token OAuth para ${id}; se usa el de agencia`, error)
-    return ghl
-  }
-}
 
 /** Turns a thrown GhlError into something the model can reason about. */
 async function attempt<T>(run: () => Promise<T>) {

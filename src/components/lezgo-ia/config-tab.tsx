@@ -14,6 +14,7 @@ import { toast } from "sonner"
 
 import { AdvisorsTable } from "@/components/lezgo-ia/advisors-table"
 import { AutomationSettings } from "@/components/lezgo-ia/automation-settings"
+import { EngineCard } from "@/components/lezgo-ia/engine-card"
 import { StageRules } from "@/components/lezgo-ia/stage-rules"
 import { SubaccountDirectory } from "@/components/lezgo-ia/subaccount-directory"
 import { SubaccountSwitcher } from "@/components/lezgo-ia/subaccount-switcher"
@@ -303,6 +304,12 @@ export function ConfigTab({
             </Button>
           </div>
         </div>
+
+        <EngineCard
+          locationId={selected.ghlLocationId}
+          demo={data.source === "demo"}
+          dirty={dirty}
+        />
 
         <Instrument
           label="Asesores"

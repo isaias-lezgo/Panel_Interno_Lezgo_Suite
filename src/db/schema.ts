@@ -2,6 +2,7 @@ import {
   type AnyPgColumn,
   boolean,
   date,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -305,4 +306,36 @@ export const lezgoIaAdvisors = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.ghlLocationId, t.ghlUserId] })],
+)
+
+/**
+ * Bitácora del motor de Lezgo IA: un renglón por aviso que salió (o que se
+ * habría mandado, en modo simulado). `key` identifica el aviso entre
+ * corridas —lead, etapa, fecha—: lo que ya tiene un renglón `sent` no se
+ * vuelve a mandar. Varios avisos viajan en un mismo mensaje y comparten
+ * `ghlMessageId` y `body`.
+ * - `recipient`: id de GHL del asesor, o "manager".
+ * - `status`: "sent", "failed" o "simulated".
+ * - `testContactId`: en modo prueba, el contacto al que llegó de verdad.
+ */
+export const lezgoIaNotifications = pgTable(
+  "lezgo_ia_notifications",
+  {
+    id: text("id").primaryKey(),
+    ghlLocationId: text("ghl_location_id").notNull(),
+    runId: text("run_id").notNull(),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    recipient: text("recipient").notNull(),
+    recipientName: text("recipient_name").notNull(),
+    status: text("status").notNull(),
+    body: text("body").notNull(),
+    testContactId: text("test_contact_id"),
+    ghlMessageId: text("ghl_message_id"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("lezgo_ia_notifications_key_idx").on(t.ghlLocationId, t.key)],
 )

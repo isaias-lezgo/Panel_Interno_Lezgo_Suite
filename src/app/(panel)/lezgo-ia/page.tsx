@@ -34,8 +34,8 @@ export default async function LezgoIaPage({
         {data.failed > 0 && (
           <p className="mb-3 text-xs text-status-warn">
             GoHighLevel no devolvió {data.failed}{" "}
-            {data.failed === 1 ? "subcuenta enlazada" : "subcuentas enlazadas"}; no
-            aparecen abajo.
+            {data.failed === 1 ? "subcuenta enlazada; no aparece" : "subcuentas enlazadas; no aparecen"}{" "}
+            abajo. Recarga la página para reintentar.
           </p>
         )}
         {data.inactive.length > 0 && (
