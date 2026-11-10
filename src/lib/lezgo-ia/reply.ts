@@ -3,7 +3,8 @@ import "server-only"
 import { ToolLoopAgent, stepCountIs } from "ai"
 import { eq } from "drizzle-orm"
 
-import { model } from "@/lib/ai/model"
+import { COPILOT_MODEL, model } from "@/lib/ai/model"
+import { usageCost } from "@/lib/ai/pricing"
 import { db, schema } from "@/db"
 import { ghlFor } from "@/lib/ghl/for-location"
 import {
@@ -58,6 +59,53 @@ export type ReplyResult =
   | { ok: false; ignored: string }
 
 const ignored = (reason: string): ReplyResult => ({ ok: false, ignored: reason })
+
+/**
+ * Un renglón `usage` por llamada al modelo: tokens y su costo estimado a
+ * precio de lista. De aquí sale "Gasto en Anthropic" en la vista. Si no se
+ * puede anotar, la respuesta sale igual.
+ */
+async function recordUsage(
+  common: {
+    ghlLocationId: string
+    runId: string
+    recipient: string
+    recipientName: string
+    testContactId: string | null
+  },
+  questionId: string,
+  usage: {
+    inputTokens: number | undefined
+    outputTokens: number | undefined
+    inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number }
+  },
+) {
+  const tokens = {
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? 0,
+  }
+  try {
+    await db!
+      .insert(schema.lezgoIaNotifications)
+      .values({
+        ...common,
+        id: `ln_use_${questionId}`,
+        key: `usage:${questionId}`,
+        kind: "usage",
+        status: "done",
+        body: JSON.stringify({
+          model: COPILOT_MODEL,
+          ...tokens,
+          microUsd: usageCost(COPILOT_MODEL, tokens),
+        }),
+      })
+      .onConflictDoNothing()
+  } catch (error) {
+    console.error("No se anotó el gasto del asistente de Lezgo IA", error)
+  }
+}
 
 export async function answerInbound(
   contactId: string,
@@ -184,7 +232,10 @@ export async function answerInbound(
       }),
       stopWhen: stepCountIs(MAX_STEPS),
     })
-    answer = (await agent.generate({ prompt: question.prompt })).text.trim()
+    const result = await agent.generate({ prompt: question.prompt })
+    answer = result.text.trim()
+    // Lo gastado se anota aunque la respuesta venga vacía: los tokens ya se cobraron.
+    if (!simulate) await recordUsage(common, question.id, result.totalUsage)
     if (!answer) throw new Error("El modelo no devolvió texto.")
   } catch (error) {
     // Sin respuesta no se mandó nada: se suelta la pregunta para poder reintentar.

@@ -28,6 +28,7 @@ import {
   type StoredStageRules,
 } from "@/lib/lezgo-ia/config"
 import { advisorUsers, toSubaccount } from "@/lib/lezgo-ia/from-ghl"
+import { sumSpend } from "@/lib/ai/pricing"
 import { actionsFromRows } from "@/lib/lezgo-ia/actions"
 import { threadsFromNotifications, weeklySentBySubaccount } from "@/lib/lezgo-ia/log"
 import type { IaStatus, SettingValues, Voice } from "@/data/lezgo-ia"
@@ -1184,6 +1185,7 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
     subaccounts: lezgoIaDemo.subaccounts,
     threads: lezgoIaDemo.threads,
     actions: lezgoIaDemoActions,
+    aiSpend: null,
     failed: 0,
     inactive: [],
   }
@@ -1236,7 +1238,11 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
     )
     const now = new Date()
     const ids = subaccounts.map((s) => s.id)
-    const [threads, actions] = await Promise.all([getLezgoIaThreads(ids), getLezgoIaActions(ids)])
+    const [threads, actions, aiSpend] = await Promise.all([
+      getLezgoIaThreads(ids),
+      getLezgoIaActions(ids),
+      getLezgoIaSpend(),
+    ])
     const weekly = weeklySentBySubaccount(threads, now)
     return {
       source: "ghl",
@@ -1247,6 +1253,7 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
       })),
       threads,
       actions,
+      aiSpend,
       failed,
       inactive,
     }
@@ -1346,6 +1353,25 @@ export async function getLezgoIaThreads(locationIds: string[]) {
   } catch (error) {
     console.error("No se leyó la bitácora de Lezgo IA", error)
     return []
+  }
+}
+
+/**
+ * Lo que el asistente de Lezgo IA lleva gastado en Anthropic: la suma de sus
+ * renglones `usage`, de todas las subcuentas. Estimación a precio de lista.
+ */
+export async function getLezgoIaSpend() {
+  const empty = { microUsd: 0, calls: 0, unpriced: 0 }
+  if (!db) return empty
+  try {
+    const rows = await db
+      .select({ body: schema.lezgoIaNotifications.body })
+      .from(schema.lezgoIaNotifications)
+      .where(eq(schema.lezgoIaNotifications.kind, "usage"))
+    return sumSpend(rows)
+  } catch (error) {
+    console.error("No se leyó el gasto de Lezgo IA", error)
+    return empty
   }
 }
 

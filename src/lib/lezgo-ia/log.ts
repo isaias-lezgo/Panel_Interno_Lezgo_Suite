@@ -44,8 +44,8 @@ function subjectFor(kinds: string[]) {
 export function threadsFromNotifications(rows: NotificationRow[]): Thread[] {
   const groups = new Map<string, NotificationRow[]>()
   for (const row of rows) {
-    // Propuestas y acciones del asistente no son mensajes: van a la Bitácora.
-    if (row.kind === "proposal" || row.kind === "action") continue
+    // Propuestas, acciones y gasto del asistente no son mensajes.
+    if (row.kind === "proposal" || row.kind === "action" || row.kind === "usage") continue
     const key = `${row.runId}:${row.recipient}`
     const group = groups.get(key)
     if (group) group.push(row)

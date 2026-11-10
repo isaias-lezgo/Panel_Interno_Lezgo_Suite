@@ -9,6 +9,7 @@ import { OverviewTab } from "@/components/lezgo-ia/overview-tab"
 import type { LezgoIaTab } from "@/components/lezgo-ia/tabs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { LezgoIaData } from "@/data/lezgo-ia"
+import { moneyExact } from "@/lib/format"
 
 type Tab = LezgoIaTab
 
@@ -42,12 +43,24 @@ export function LezgoIaView({
     <div className="space-y-4">
       <section
         aria-label="Telemetría de Lezgo IA"
-        className="grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:divide-x lg:grid-cols-4"
+        className={
+          data.aiSpend
+            ? "grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:divide-x lg:grid-cols-5"
+            : "grid grid-cols-2 divide-border overflow-hidden rounded-lg border border-border bg-card sm:divide-x lg:grid-cols-4"
+        }
       >
         <Readout label="Subcuentas con IA activa" value={activeAccounts} hint={`de ${subaccounts.length} ${data.source === "ghl" ? "enlazadas a un cliente" : "conectadas"}`} />
         <Readout label="Asesores con avisos" value={advisorsWithAlerts} hint="reciben mensajes de la IA" />
         <Readout label="Mensajes esta semana" value={weeklyMessages} hint="entre la IA y los asesores" />
         <Readout label="Esperan respuesta" value={pending} hint="propuestas sin decidir" tone={pending > 0 ? "warn" : undefined} />
+        {data.aiSpend && (
+          <Readout
+            label="Gasto en Anthropic"
+            // Micro-USD a centavos; lleva "USD" porque el panel suma en MXN y ambos usan "$".
+            value={`${moneyExact(Math.round(data.aiSpend.microUsd / 10_000), "usd")} USD`}
+            hint={spendHint(data.aiSpend)}
+          />
+        )}
       </section>
 
       <Tabs
@@ -98,6 +111,12 @@ export function LezgoIaView({
   )
 }
 
+/** Cuántas respuestas suma la cifra, y cuántas quedaron fuera por no tener precio. */
+function spendHint(spend: NonNullable<LezgoIaData["aiSpend"]>) {
+  const answers = `${spend.calls} ${spend.calls === 1 ? "respuesta" : "respuestas"} de la IA, a precio de lista`
+  return spend.unpriced > 0 ? `${answers}; ${spend.unpriced} sin precio, fuera de la suma` : answers
+}
+
 function Readout({
   label,
   value,
@@ -105,7 +124,7 @@ function Readout({
   tone,
 }: {
   label: string
-  value: number
+  value: number | string
   hint: string
   tone?: "warn"
 }) {

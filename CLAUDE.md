@@ -393,6 +393,33 @@ con el detalle en JSON; las acciones son la pestaña Bitácora. Los endpoints
 (`PUT /opportunities/:id/status`, `POST /contacts/:id/tasks`) **no se han
 verificado contra la API real**.
 
+**Gasto en Anthropic.** Cada respuesta del asistente deja un renglón
+`usage` en `lezgo_ia_notifications` con sus tokens y su costo estimado, y la
+franja de cifras de Lezgo IA suma todos en "Gasto en Anthropic", siempre en
+USD. Los precios son de lista y están en `src/lib/ai/pricing.ts`: un modelo
+que no esté en esa tabla **no se estima** y se declara "sin precio". Es una
+estimación —la cifra oficial es la consola de Anthropic— y cuenta desde el
+10 de noviembre de 2026: las respuestas anteriores no guardaron sus tokens.
+El Copiloto del panel no entra en esa cifra.
+
+**Dónde va Lezgo IA** (10 de noviembre de 2026). Probado de punta a punta
+con el número de pruebas: el motor avisa, el webhook de la app OAuth recibe
+la respuesta y el asistente contesta consultando el CRM. Publicado con las
+acciones prendidas solo en la subcuenta propia
+(`LEZGO_IA_WRITE_ACTIONS=interna`); **crear tarea y marcar perdido aún no se
+prueban contra GHL**. Falta, y depende de decisiones del equipo:
+- **Un número de WhatsApp propio para Lezgo IA** antes de escribirle a un
+  asesor real. Hoy sale del 442 931 5445, el del equipo: el admin de una
+  subcuenta suele ser también el contacto del cliente en Lezgo Suite, y el
+  asistente contestaría cualquier cosa que ese cliente escriba ahí.
+- Con ese número: ligar el teléfono de cada asesor a su usuario y abrir la
+  entrega por subcuenta.
+- Prender el cron; con plan Hobby solo corre una vez al día.
+- El motor lee 500 oportunidades por subcuenta y hay subcuentas con más de
+  3,000: falta decidir qué pipelines o qué antigüedad vigilar.
+- Ajustes guardados que nadie lee todavía: recordatorio de visita, análisis
+  de la cartera, leads calientes y canal de aviso.
+
 **Cron de Lezgo IA — en pausa.** La ruta `/api/lezgo-ia/cron` existe pero
 nadie la llama: no hay `vercel.json`. Para prenderlo, un `vercel.json` con
 `"crons": [{ "path": "/api/lezgo-ia/cron", "schedule": "0 15 * * *" }]`
@@ -461,7 +488,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 23 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
+pnpm test         # vitest, 24 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero

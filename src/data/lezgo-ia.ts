@@ -1106,6 +1106,12 @@ export type LezgoIaData = {
   subaccounts: Subaccount[]
   threads: Thread[]
   actions: GhlAction[]
+  /**
+   * Lo que el asistente ha gastado en la API de Anthropic, estimado a precio
+   * de lista, en millonésimas de USD. `unpriced` son llamadas de un modelo
+   * sin precio en la tabla: no entran en la suma. `null` en el demo.
+   */
+  aiSpend: { microUsd: number; calls: number; unpriced: number } | null
   /** Subcuentas enlazadas que GHL no devolvió. */
   failed: number
   /** Subcuentas enlazadas que GHL tiene desactivadas: no fallan, no existen para la IA. */
