@@ -1,7 +1,7 @@
 import "server-only"
 
 import { ToolLoopAgent, stepCountIs } from "ai"
-import { eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 
 import { COPILOT_MODEL, model } from "@/lib/ai/model"
 import { usageCost } from "@/lib/ai/pricing"
@@ -15,7 +15,7 @@ import {
 } from "@/lib/ghl/lezgo-suite"
 import { getLastNotificationTo, getLezgoIaConfig, getLezgoIaData } from "@/lib/repository"
 
-import { writeMode } from "./actions"
+import { describeAction, isLive, writeMode, type ActionDetail } from "./actions"
 import { assistantInstructions, leadScope, pendingQuestion, transcript } from "./assistant"
 import { assistantTools } from "./assistant-tools"
 import { resolveAdvisor } from "./config"
@@ -59,6 +59,44 @@ export type ReplyResult =
   | { ok: false; ignored: string }
 
 const ignored = (reason: string): ReplyResult => ({ ok: false, ignored: reason })
+
+/** Las propuestas del asistente a esta persona que siguen esperando su sí. */
+async function livingProposals(locationId: string, recipient: string, now: Date) {
+  const rows = await db!
+    .select({
+      status: schema.lezgoIaNotifications.status,
+      body: schema.lezgoIaNotifications.body,
+      createdAt: schema.lezgoIaNotifications.createdAt,
+    })
+    .from(schema.lezgoIaNotifications)
+    .where(
+      and(
+        eq(schema.lezgoIaNotifications.ghlLocationId, locationId),
+        eq(schema.lezgoIaNotifications.recipient, recipient),
+        eq(schema.lezgoIaNotifications.kind, "proposal"),
+        eq(schema.lezgoIaNotifications.status, "pending"),
+      ),
+    )
+    .orderBy(desc(schema.lezgoIaNotifications.createdAt))
+    .limit(20)
+  return rows
+    .filter((row) => isLive(row, now.getTime()))
+    .flatMap((row) => {
+      try {
+        const detail = JSON.parse(row.body) as ActionDetail
+        return [
+          {
+            action: detail.action,
+            opportunityId: detail.opportunityId,
+            lead: detail.lead,
+            summary: describeAction(detail),
+          },
+        ]
+      } catch {
+        return []
+      }
+    })
+}
 
 /**
  * Un renglón `usage` por llamada al modelo: tokens y su costo estimado a
@@ -183,6 +221,8 @@ export async function answerInbound(
     crmWrite: settings.crmWrite?.option,
   })
 
+  const pendingProposals = writes === "confirm" ? await livingProposals(locationId, last.recipient, now) : []
+
   let answer: string
   try {
     const agent = new ToolLoopAgent({
@@ -194,6 +234,7 @@ export async function answerInbound(
         isManager: last.recipient === "manager",
         ownOnly: scope.assignedTo !== null,
         writes,
+        pendingProposals,
         now: now.toLocaleString("es-MX", {
           timeZone: config.timezone,
           weekday: "long",

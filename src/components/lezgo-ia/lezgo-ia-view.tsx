@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 
 import { ActionsTab } from "@/components/lezgo-ia/actions-tab"
 import { ConfigTab } from "@/components/lezgo-ia/config-tab"
@@ -12,6 +13,33 @@ import type { LezgoIaData } from "@/data/lezgo-ia"
 import { moneyExact } from "@/lib/format"
 
 type Tab = LezgoIaTab
+
+/** Cada cuánto se relee la vista mientras está abierta y a la vista. */
+const REFRESH_MS = 20_000
+
+/**
+ * Lo que llega por WhatsApp —la pregunta de un asesor, la respuesta de la
+ * IA, una acción— no pasa por el navegador, así que la vista se relee sola.
+ * Solo con la pestaña a la vista: en segundo plano no gasta, y al volver se
+ * pone al día de inmediato. Es barato: GHL ya está en caché y cada vuelta
+ * lee nada más la bitácora en Neon. La configuración a medio editar no se
+ * toca: vive en el estado de su pestaña, no en lo que llega del servidor.
+ */
+function useLiveRefresh(enabled: boolean) {
+  const router = useRouter()
+  useEffect(() => {
+    if (!enabled) return
+    const refresh = () => {
+      if (document.visibilityState === "visible") router.refresh()
+    }
+    const timer = window.setInterval(refresh, REFRESH_MS)
+    document.addEventListener("visibilitychange", refresh)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", refresh)
+    }
+  }, [enabled, router])
+}
 
 /**
  * Las dos pestañas de Lezgo IA. El tab activo se refleja en `?tab=` para que
@@ -29,6 +57,8 @@ export function LezgoIaView({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const { subaccounts, threads } = data
+  // El demo no cambia solo: no hay nada que releer.
+  useLiveRefresh(data.source === "ghl")
 
   const activeAccounts = subaccounts.filter((s) => s.status === "active").length
   const advisorsWithAlerts = subaccounts
@@ -100,8 +130,7 @@ export function LezgoIaView({
           <ConfigTab data={data} initialAccount={initialAccount} />
         </TabsContent>
         <TabsContent value="mensajes" className="pt-3">
-          {/* La llave vuelve a sembrar los hilos cuando una corrida agrega uno. */}
-          <MessagesTab key={threads[0]?.id ?? "sin-hilos"} data={data} />
+          <MessagesTab data={data} />
         </TabsContent>
         <TabsContent value="bitacora" className="pt-3">
           <ActionsTab data={data} />

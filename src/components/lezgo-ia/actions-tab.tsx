@@ -43,6 +43,12 @@ export function ActionsTab({ data }: { data: LezgoIaData }) {
     [subaccounts],
   )
   const [rows, setRows] = useState<GhlAction[]>(data.actions)
+  // La vista se relee sola: lo que llega del servidor reemplaza la lista.
+  const [seen, setSeen] = useState(data.actions)
+  if (data.actions !== seen) {
+    setSeen(data.actions)
+    setRows(data.actions)
+  }
   const [account, setAccount] = useState("todas")
   const [kind, setKind] = useState<ActionKind | "todas">("todas")
 

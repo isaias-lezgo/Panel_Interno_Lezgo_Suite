@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { actionsFromRows, confirmable, writeMode } from "./actions"
+import { actionsFromRows, confirmable, isLive, sameAction, writeMode } from "./actions"
 
 describe("writeMode", () => {
   it("sin el interruptor no hay acciones, diga lo que diga el ajuste", () => {
@@ -66,5 +66,23 @@ describe("actionsFromRows", () => {
       reversible: false,
     })
     expect(actions[1]).toMatchObject({ kind: "lost", text: "Oportunidad marcada como perdida. A petición de Ana López." })
+  })
+})
+
+describe("propuestas repetidas", () => {
+  const now = Date.parse("2026-11-10T12:00:00Z")
+
+  it("una propuesta pendiente de menos de un día sigue viva", () => {
+    expect(isLive({ status: "pending", createdAt: "2026-11-10T11:00:00Z" }, now)).toBe(true)
+    expect(isLive({ status: "done", createdAt: "2026-11-10T11:00:00Z" }, now)).toBe(false)
+    expect(isLive({ status: "pending", createdAt: "2026-11-09T11:00:00Z" }, now)).toBe(false)
+  })
+
+  it("misma acción si coinciden oportunidad y detalle", () => {
+    const lost = { action: "lost" as const, opportunityId: "o1", contactId: "c1", lead: "Luis" }
+    expect(sameAction(lost, { ...lost, lead: "Luis Miguel" })).toBe(true)
+    const task = { ...lost, action: "task" as const, title: "Llamar", dueInDays: 1 }
+    expect(sameAction(task, { ...task, dueInDays: 2 })).toBe(false)
+    expect(sameAction(lost, task)).toBe(false)
   })
 })

@@ -79,6 +79,13 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
     [accountById],
   )
   const [threads, setThreads] = useState<Thread[]>(seed)
+  // La vista se relee sola: cuando llegan hilos nuevos del servidor, mandan.
+  // Filtros, búsqueda e hilo abierto se quedan como estaban.
+  const [seen, setSeen] = useState(seed)
+  if (seed !== seen) {
+    setSeen(seed)
+    setThreads(seed)
+  }
   const [account, setAccount] = useState("todas")
   const [kind, setKind] = useState<KindFilter>("todos")
   const [query, setQuery] = useState("")

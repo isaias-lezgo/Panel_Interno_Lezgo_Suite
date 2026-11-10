@@ -11,7 +11,9 @@ import { GhlError, type GhlClient, type GhlOpportunity } from "@/lib/ghl/client"
 import {
   confirmable,
   describeAction,
+  isLive,
   proposalKey,
+  sameAction,
   type ActionDetail,
   type AssistantAction,
 } from "./actions"
@@ -215,6 +217,46 @@ export function assistantTools(input: {
                   const { detail } = await detailOf(opportunityId, action, { title, dueInDays })
                   if (!w.simulate) {
                     const key = proposalKey(action, opportunityId)
+                    // Si ya propuso esto mismo y sigue vivo, NO se reescribe: reescribirlo
+                    // le pondría el turno actual y el "sí" del asesor nunca alcanzaría a
+                    // confirmarlo (el modelo no recuerda sus llamadas de turnos anteriores
+                    // y tiende a volver a proponer).
+                    const [existing] = await db!
+                      .select({
+                        runId: schema.lezgoIaNotifications.runId,
+                        status: schema.lezgoIaNotifications.status,
+                        body: schema.lezgoIaNotifications.body,
+                        createdAt: schema.lezgoIaNotifications.createdAt,
+                      })
+                      .from(schema.lezgoIaNotifications)
+                      .where(
+                        and(
+                          eq(schema.lezgoIaNotifications.ghlLocationId, locationId),
+                          eq(schema.lezgoIaNotifications.key, key),
+                          eq(schema.lezgoIaNotifications.recipient, w.recipient),
+                          eq(schema.lezgoIaNotifications.status, "pending"),
+                        ),
+                      )
+                      .orderBy(desc(schema.lezgoIaNotifications.createdAt))
+                      .limit(1)
+                    if (
+                      existing &&
+                      isLive(existing, now.getTime()) &&
+                      sameAction(JSON.parse(existing.body) as ActionDetail, detail)
+                    ) {
+                      return existing.runId === w.runId
+                        ? {
+                            propuesta: describeAction(detail),
+                            lead: detail.lead,
+                            siguiente: "Ya la propusiste en este turno. Pide confirmación al asesor.",
+                          }
+                        : {
+                            propuesta: describeAction(detail),
+                            lead: detail.lead,
+                            siguiente:
+                              "Esta propuesta ya existía de un turno anterior. Si el mensaje actual del asesor la confirma, llama executeAction AHORA; no pidas otra confirmación.",
+                          }
+                    }
                     // Una sola propuesta viva por acción y oportunidad: la nueva reemplaza a la vieja.
                     await db!
                       .delete(schema.lezgoIaNotifications)

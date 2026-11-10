@@ -80,6 +80,21 @@ export function confirmable(
   return { ok: true }
 }
 
+/** ¿Sigue viva esta propuesta? Pendiente y de menos de un día. */
+export function isLive(proposal: { status: string; createdAt: string }, now: number) {
+  return proposal.status === "pending" && now - Date.parse(proposal.createdAt) <= PROPOSAL_TTL_MS
+}
+
+/** ¿Dos propuestas piden exactamente lo mismo? */
+export function sameAction(a: ActionDetail, b: ActionDetail) {
+  return (
+    a.action === b.action &&
+    a.opportunityId === b.opportunityId &&
+    (a.title ?? null) === (b.title ?? null) &&
+    (a.dueInDays ?? null) === (b.dueInDays ?? null)
+  )
+}
+
 export function describeAction(detail: ActionDetail) {
   return detail.action === "lost"
     ? "Oportunidad marcada como perdida."

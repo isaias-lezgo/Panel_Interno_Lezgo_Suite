@@ -124,6 +124,12 @@ export function assistantInstructions(input: {
   ownOnly: boolean
   /** Qué puede hacer en el CRM: nada, con confirmación del asesor, o directo. */
   writes: "off" | "confirm" | "free"
+  /**
+   * Lo que ya propuso en turnos anteriores y espera el sí del asesor. El
+   * modelo no recuerda sus llamadas a herramientas entre mensajes: sin esta
+   * lista vuelve a proponer en vez de ejecutar.
+   */
+  pendingProposals?: { action: string; opportunityId: string; lead: string; summary: string }[]
   /** "lunes, 9 de noviembre de 2026, 18:40" en la zona de la subcuenta. */
   now: string
   transcript: string
@@ -167,7 +173,23 @@ ${
 
 - Ahora: ${input.now} (hora de la subcuenta).
 
-## Conversación hasta ahora
+${
+    input.writes === "confirm"
+      ? `## Propuestas tuyas que esperan confirmación
+
+${
+  input.pendingProposals?.length
+    ? `${input.pendingProposals
+        .map((p) => `- ${p.lead}: ${p.summary} → executeAction({ opportunityId: "${p.opportunityId}", action: "${p.action}" })`)
+        .join("\n")}
+
+Estas ya las propusiste en un turno anterior. Si el mensaje de ahora las confirma ("sí", "dale", "hazlo"), llama \`executeAction\` de inmediato con esos datos: NO vuelvas a llamar \`proposeAction\` ni pidas otra confirmación. Si el asesor dice que no o cambia de tema, déjalas.`
+    : "Ninguna. Para hacer algo en el CRM primero propón con `proposeAction`."
+}
+
+`
+      : ""
+  }## Conversación hasta ahora
 
 ${input.transcript || "(Sin mensajes anteriores.)"}`
 }
