@@ -25,6 +25,8 @@ export type NotificationRow = {
   createdAt: string
 }
 
+const NOT_MESSAGES = new Set(["proposal", "action", "usage", "run"])
+
 const deliveryStatus = (status: string): NonNullable<Thread["delivery"]>["status"] =>
   status === "sent" || status === "failed" ? status : "simulated"
 
@@ -44,8 +46,8 @@ function subjectFor(kinds: string[]) {
 export function threadsFromNotifications(rows: NotificationRow[]): Thread[] {
   const groups = new Map<string, NotificationRow[]>()
   for (const row of rows) {
-    // Propuestas, acciones y gasto del asistente no son mensajes.
-    if (row.kind === "proposal" || row.kind === "action" || row.kind === "usage") continue
+    // Propuestas, acciones, gasto y marcas de corrida no son mensajes.
+    if (NOT_MESSAGES.has(row.kind)) continue
     const key = `${row.runId}:${row.recipient}`
     const group = groups.get(key)
     if (group) group.push(row)

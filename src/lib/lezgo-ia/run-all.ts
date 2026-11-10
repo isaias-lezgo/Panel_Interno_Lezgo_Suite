@@ -1,21 +1,28 @@
 import "server-only"
 
-import { getLezgoIaData } from "@/lib/repository"
+import { getLezgoIaData, getLezgoIaLastRuns } from "@/lib/repository"
 
 import { runLezgoIa, type RunResult } from "./run"
+import { dueLocations, MIN_GAP_MS, type Pass } from "./schedule"
 
 /**
- * Una corrida del motor sobre cada subcuenta con la IA activa, una tras
- * otra: en paralelo se pelearían el mismo WhatsApp de salida. La dispara el
- * cron (`/api/lezgo-ia/cron`).
+ * Una corrida programada del motor sobre las subcuentas con la IA activa,
+ * una tras otra: en paralelo se pelearían el mismo WhatsApp de salida y el
+ * límite de GHL. La dispara `/api/lezgo-ia/cron`.
  *
- * Leer una subcuenta grande tarda cerca de un minuto por el ritmo que pide
- * GHL, y la función tiene un tiempo máximo: cuando el presupuesto se acaba,
- * las que faltan se reportan en `pending` y les toca en la siguiente corrida.
+ * No caben todas en una llamada —una subcuenta grande tarda cerca de un
+ * minuto en la pasada completa—, así que se reparte: corre primero la que
+ * lleva más tiempo sin revisarse y, cuando el presupuesto se acaba, las que
+ * faltan quedan en `pending`. La siguiente llamada sigue con esas, porque
+ * las que ya pasaron quedan fuera hasta que venza su hueco (`MIN_GAP_MS`).
  * Lo que una corrida no alcanzó a mandar no se pierde: no queda anotado
  * como enviado.
  */
-export async function runAllActive(options: { budgetMs: number; now?: () => number }) {
+export async function runAllActive(options: {
+  budgetMs: number
+  pass: Pass
+  now?: () => number
+}) {
   const now = options.now ?? Date.now
   const started = now()
   const data = await getLezgoIaData()
@@ -24,19 +31,35 @@ export async function runAllActive(options: { budgetMs: number; now?: () => numb
   }
 
   const active = data.subaccounts.filter((s) => s.status === "active")
+  const due = dueLocations(active, await getLezgoIaLastRuns(options.pass), {
+    now: started,
+    minGapMs: MIN_GAP_MS[options.pass],
+  })
+
   const runs: { location: string; result: RunResult }[] = []
   const pending: string[] = []
-  for (const account of active) {
+  for (const account of due) {
     if (now() - started > options.budgetMs) {
       pending.push(account.name)
       continue
     }
     try {
-      runs.push({ location: account.name, result: await runLezgoIa(account.ghlLocationId) })
+      runs.push({
+        location: account.name,
+        result: await runLezgoIa(account.ghlLocationId, { pass: options.pass }),
+      })
     } catch (error) {
       console.error(`El motor de Lezgo IA falló en ${account.name}`, error)
       runs.push({ location: account.name, result: { ok: false, error: "El motor falló a la mitad." } })
     }
   }
-  return { ok: true as const, active: active.length, runs, pending }
+  return {
+    ok: true as const,
+    pass: options.pass,
+    active: active.length,
+    /** Activas que no tocaban todavía: corrieron hace poco. */
+    recent: active.length - due.length,
+    runs,
+    pending,
+  }
 }

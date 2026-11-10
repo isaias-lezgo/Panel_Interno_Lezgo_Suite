@@ -3,17 +3,19 @@ import { timingSafeEqual } from "node:crypto"
 import { NextResponse, type NextRequest } from "next/server"
 
 import { runAllActive } from "@/lib/lezgo-ia/run-all"
+import { parsePass } from "@/lib/lezgo-ia/schedule"
 
 /**
- * El cron de Vercel (`vercel.json`) corre aquí el motor de Lezgo IA sobre
- * todas las subcuentas activas. Vercel manda `Authorization: Bearer
- * $CRON_SECRET`; sin esa variable la ruta no corre nada. Está fuera del
- * candado (`src/proxy.ts`) porque el cron no tiene sesión.
+ * Corre el motor de Lezgo IA sobre las subcuentas activas a las que les
+ * toca. La llama quien programe —el cron de Vercel o un escenario de Make—
+ * con `Authorization: Bearer $CRON_SECRET`; sin esa variable la ruta no
+ * corre nada. Está fuera del candado (`src/proxy.ts`) porque quien programa
+ * no tiene sesión.
  *
- * En el plan Hobby el cron dispara una vez al día, en algún momento de la
- * hora programada. Los avisos de minutos ("lead nuevo a los 30 min")
- * necesitan correr más seguido: plan Pro o un disparador externo que llame
- * esta misma ruta con el secreto.
+ * `?pasada=rapida` revisa solo los leads del último día (para correr cada
+ * 5 o 10 minutos); `?pasada=completa`, o nada, revisa todo (una o dos veces
+ * al día). Si no alcanzan todas las subcuentas, la respuesta trae las que
+ * quedaron en `pending` y la siguiente llamada sigue con ellas.
  */
 export const maxDuration = 300
 
@@ -29,7 +31,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No autorizado." }, { status: 401 })
   }
 
-  const result = await runAllActive({ budgetMs: BUDGET_MS })
+  const result = await runAllActive({
+    budgetMs: BUDGET_MS,
+    pass: parsePass(request.nextUrl.searchParams.get("pasada")),
+  })
   console.info("Cron de Lezgo IA", JSON.stringify(result))
   return NextResponse.json(result)
 }

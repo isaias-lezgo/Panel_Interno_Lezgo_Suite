@@ -9,6 +9,7 @@ import { mapLimit } from "@/lib/map-limit"
 import { getLezgoIaConfig, getLezgoIaData, getSentNotificationKeys } from "@/lib/repository"
 
 import type { NotifyDecision } from "./config"
+import type { Pass } from "./schedule"
 import {
   composeMessage,
   detectAlerts,
@@ -46,6 +47,8 @@ const CONCURRENCY = 4
 export type RunSummary = {
   ok: true
   location: string
+  /** Rápida: solo leads del último día. Completa: todo lo que el motor lee. */
+  pass: Pass
   mode: "prueba" | "simulado"
   /** La IA de la subcuenta no está activa: no se revisó nada. */
   inactive: boolean
@@ -69,8 +72,9 @@ export type RunResult = RunSummary | { ok: false; error: string }
 
 export async function runLezgoIa(
   locationId: string,
-  options: { repeat?: boolean } = {},
+  options: { repeat?: boolean; pass?: Pass } = {},
 ): Promise<RunResult> {
+  const pass = options.pass ?? "full"
   if (!db) return { ok: false, error: "Sin base de datos: el motor no corre en modo demo." }
   if (!lezgoSuiteEnabled()) {
     return { ok: false, error: "Falta GHL_LEZGO_SUITE_TOKEN: los avisos salen de esa subcuenta." }
@@ -87,6 +91,7 @@ export async function runLezgoIa(
   const summary: RunSummary = {
     ok: true,
     location: account.name,
+    pass,
     mode: testContactId ? "prueba" : "simulado",
     inactive: config.status !== "active",
     opportunities: 0,
@@ -108,7 +113,12 @@ export async function runLezgoIa(
     const client = await ghlFor(locationId)
     // Un solo ritmo para toda la corrida: páginas, conversaciones y mensajes.
     const paced = createPacedReader()
-    const read = await readOpportunities(client, locationId, paced)
+    const read = await readOpportunities(
+      client,
+      locationId,
+      paced,
+      pass === "quick" ? new Date(Date.now() - DAY_MS) : null,
+    )
     summary.truncated = read.truncated
     totalOpen = read.total
     opportunities = await withConversations(client, locationId, read.opportunities, paced)
@@ -120,7 +130,7 @@ export async function runLezgoIa(
   summary.opportunities = opportunities.length
 
   const now = new Date()
-  const alerts = detectAlerts({
+  const detected = detectAlerts({
     now,
     account: config,
     pipelines: account.pipelines,
@@ -128,6 +138,10 @@ export async function runLezgoIa(
     opportunities,
     totalOpen,
   })
+  // La pasada rápida solo vio leads de un día: lo único que puede decir con
+  // certeza es quién sigue sin primer contacto. El resto es de la completa.
+  const alerts =
+    pass === "quick" ? detected.filter((a) => a.kind === "newLeadUntouched") : detected
   summary.alerts = alerts.length
 
   const sentKeys = options.repeat
@@ -198,6 +212,29 @@ export async function runLezgoIa(
     )
   }
 
+  // Marca de que esta subcuenta ya tuvo su pasada: el reparto del cron la usa
+  // para saber a quién le toca. Si no se puede anotar, la corrida ya salió.
+  try {
+    await db.insert(schema.lezgoIaNotifications).values({
+      id: `ln_run_${crypto.randomUUID()}`,
+      ghlLocationId: locationId,
+      runId,
+      key: `run:${pass}`,
+      kind: "run",
+      recipient: "system",
+      recipientName: "Motor",
+      status: "done",
+      body: JSON.stringify({
+        opportunities: summary.opportunities,
+        alerts: summary.alerts,
+        messages: summary.messages.length,
+        held: summary.held,
+      }),
+    })
+  } catch (error) {
+    console.error("No se anotó la corrida del motor de Lezgo IA", error)
+  }
+
   return summary
 }
 
@@ -205,7 +242,28 @@ export async function runLezgoIa(
 
 type PacedReader = ReturnType<typeof createPacedReader>
 
-async function readOpportunities(client: GhlClient, locationId: string, paced: PacedReader) {
+const DAY_MS = 24 * 3_600_000
+
+/** "11-08-2026": el formato que pide `date` en la búsqueda de GHL. */
+function ghlDate(at: Date) {
+  const mm = String(at.getUTCMonth() + 1).padStart(2, "0")
+  const dd = String(at.getUTCDate()).padStart(2, "0")
+  return `${mm}-${dd}-${at.getUTCFullYear()}`
+}
+
+/**
+ * Las oportunidades abiertas, de la más nueva a la más vieja (el orden por
+ * defecto de GHL). Con `since`, solo las creadas desde entonces: se le pide
+ * a GHL desde un día antes —su filtro es por día, sin hora ni zona— y aquí
+ * se recorta al instante exacto.
+ */
+async function readOpportunities(
+  client: GhlClient,
+  locationId: string,
+  paced: PacedReader,
+  since: Date | null = null,
+) {
+  const date = since ? ghlDate(new Date(since.getTime() - DAY_MS)) : undefined
   const all: GhlOpportunity[] = []
   let cursor: { startAfter?: number; startAfterId?: string } = {}
   let total = 0
@@ -215,6 +273,7 @@ async function readOpportunities(client: GhlClient, locationId: string, paced: P
         locationId,
         status: "open",
         limit: 100,
+        date,
         ...cursor,
       }),
     )
@@ -222,6 +281,11 @@ async function readOpportunities(client: GhlClient, locationId: string, paced: P
     total = page.meta.total
     if (!page.meta.startAfterId || page.opportunities.length === 0 || all.length >= total) break
     cursor = { startAfter: page.meta.startAfter, startAfterId: page.meta.startAfterId }
+  }
+  if (since) {
+    const fresh = all.filter((o) => o.createdAt && Date.parse(o.createdAt) >= since.getTime())
+    // En la rápida el total de GHL es el de su filtro por día, no el de la subcuenta.
+    return { opportunities: fresh, total: fresh.length, truncated: total > all.length }
   }
   return { opportunities: all, total, truncated: total > all.length }
 }

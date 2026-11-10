@@ -1376,6 +1376,28 @@ export async function getLezgoIaSpend() {
 }
 
 /**
+ * Cuándo tuvo cada subcuenta su última pasada del motor de ese tipo
+ * ("quick" o "full"). El cron reparte con esto: primero la más atrasada.
+ */
+export async function getLezgoIaLastRuns(pass: "quick" | "full") {
+  if (!db) return new Map<string, string>()
+  const rows = await db
+    .select({
+      ghlLocationId: schema.lezgoIaNotifications.ghlLocationId,
+      at: max(schema.lezgoIaNotifications.createdAt),
+    })
+    .from(schema.lezgoIaNotifications)
+    .where(
+      and(
+        eq(schema.lezgoIaNotifications.kind, "run"),
+        eq(schema.lezgoIaNotifications.key, `run:${pass}`),
+      ),
+    )
+    .groupBy(schema.lezgoIaNotifications.ghlLocationId)
+  return new Map(rows.flatMap((r) => (r.at ? [[r.ghlLocationId, r.at] as const] : [])))
+}
+
+/**
  * ¿Lezgo IA puede configurarse y correr en esta subcuenta? Las enlazadas a
  * un cliente y la propia de Lezgo Suite. Lo usan las acciones del servidor:
  * el navegador no elige a cuál escribir.

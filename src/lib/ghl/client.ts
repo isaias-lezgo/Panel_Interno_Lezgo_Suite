@@ -294,7 +294,9 @@ export class GhlClient {
   /**
    * `pipeline_id` va en snake_case aquí (verificado contra la API); el resto
    * de campos de búsqueda no. La paginación es por cursor: `meta.startAfter`
-   * y `meta.startAfterId` de la respuesta anterior.
+   * y `meta.startAfterId` de la respuesta anterior. Sin `order` llegan de
+   * la más nueva a la más vieja (igual que `added_desc`). `date` deja solo
+   * las creadas desde ese día, en formato MM-DD-YYYY.
    */
   searchOpportunities(params: {
     locationId?: string
@@ -304,6 +306,9 @@ export class GhlClient {
     assignedTo?: string
     /** Texto libre: nombre de la oportunidad o del contacto. */
     query?: string
+    order?: "added_asc" | "added_desc"
+    /** Creadas desde este día, MM-DD-YYYY. */
+    date?: string
     limit?: number
     startAfter?: number
     startAfterId?: string
@@ -325,6 +330,8 @@ export class GhlClient {
         status: params.status,
         assigned_to: params.assignedTo,
         q: params.query,
+        order: params.order,
+        date: params.date,
         limit: params.limit ?? 25,
         startAfter: params.startAfter,
         startAfterId: params.startAfterId,

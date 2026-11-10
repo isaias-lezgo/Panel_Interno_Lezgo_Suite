@@ -154,7 +154,9 @@ tipos. Detalles ya verificados contra la API real:
   not found" aunque el secret esté mal. Solo un código real prueba el
   secret.
 - `GET /opportunities/search` filtra por asesor con `assigned_to` y
-  `status=open`; con `limit=1`, `meta.total` es el conteo.
+  `status=open`; con `limit=1`, `meta.total` es el conteo. Sin `order`
+  devuelve de la más nueva a la más vieja (`added_desc`); `order=added_asc`
+  lo invierte. `date=MM-DD-YYYY` deja solo las creadas desde ese día.
 - **Las lecturas en lote a GHL llevan tope** (`src/lib/map-limit.ts`). El `fetch`
   de Node no limita conexiones por host y la carga de Lezgo IA son unas 360
   llamadas: sin tope, una carga real perdió 19 de 33 subcuentas con
@@ -414,21 +416,29 @@ prueban contra GHL**. Falta, y depende de decisiones del equipo:
   asistente contestaría cualquier cosa que ese cliente escriba ahí.
 - Con ese número: ligar el teléfono de cada asesor a su usuario y abrir la
   entrega por subcuenta.
-- Prender el cron; con plan Hobby solo corre una vez al día.
+- Programar el cron (Make o Vercel Pro): la ruta y sus dos pasadas ya
+  están; falta `CRON_SECRET` en Vercel y quien la llame.
 - El motor lee 500 oportunidades por subcuenta y hay subcuentas con más de
   3,000: falta decidir qué pipelines o qué antigüedad vigilar.
 - Ajustes guardados que nadie lee todavía: recordatorio de visita, análisis
   de la cartera, leads calientes y canal de aviso.
 
-**Cron de Lezgo IA — en pausa.** La ruta `/api/lezgo-ia/cron` existe pero
-nadie la llama: no hay `vercel.json`. Para prenderlo, un `vercel.json` con
-`"crons": [{ "path": "/api/lezgo-ia/cron", "schedule": "0 15 * * *" }]`
-(15:00 UTC, 9:00 de México; en Hobby cae en algún momento de esa hora) y
-`CRON_SECRET` en Vercel. Corre el motor en cada subcuenta activa, una tras otra, con un presupuesto
-de tiempo: las que no alcanzan quedan para la siguiente
-(`src/lib/lezgo-ia/run-all.ts`). Entra con `CRON_SECRET`, que Vercel manda
-solo. Una vez al día no alcanza para los avisos de minutos: eso pide plan
-Pro o un disparador externo a la misma ruta.
+**Cron de Lezgo IA.** `/api/lezgo-ia/cron` corre el motor en las
+subcuentas activas a las que les toca; entra con `Authorization: Bearer
+$CRON_SECRET`. **Nadie la llama todavía**: no hay `vercel.json` ni
+`CRON_SECRET` en Vercel. La puede programar un escenario de Make (un módulo
+HTTP con ese header) o, con plan Pro, el cron de Vercel; en Hobby el cron
+solo corre una vez al día. Tiene dos pasadas
+(`src/lib/lezgo-ia/schedule.ts`):
+- `?pasada=rapida`: solo oportunidades creadas en el último día y solo el
+  aviso de "lead nuevo sin primer contacto". Para cada 5 o 10 minutos.
+- `?pasada=completa` (o nada): todo lo demás. Una o dos veces al día.
+No caben todas las subcuentas en una llamada, así que se reparte
+(`run-all.ts`): primero la que lleva más tiempo sin revisarse, y las que no
+alcanzan vuelven en `pending` para la siguiente llamada. Cada corrida deja
+un renglón `run` en `lezgo_ia_notifications`; de ahí sale a quién le toca.
+Una subcuenta no repite la misma pasada antes de 4 minutos (rápida) o 6
+horas (completa).
 
 **Lezgo IA en la subcuenta propia.** La subcuenta Lezgo Suite aparece en
 Lezgo IA como "Equipo Lezgo (interna)" aunque no sea de ningún cliente, y
@@ -488,7 +498,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 24 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
+pnpm test         # vitest, 25 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
@@ -518,7 +528,7 @@ devuelven un error explicado en la interfaz.
 | `LEZGO_IA_TEST_CONTACT_ID` | Contacto de Lezgo Suite al que llegan todos los avisos del motor en pruebas. Vacía = simulado |
 | `LEZGO_IA_WEBHOOK_SECRET` | Secreto alterno del webhook de mensajes entrantes (`x-lezgo-ia-secret` o `?secreto=`) y el único que abre `?simular=1`. Vacía = solo entra la firma de GHL |
 | `LEZGO_IA_WRITE_ACTIONS` | Deja al asistente crear tareas y marcar perdidos: `interna` solo en la subcuenta Lezgo Suite, `1` en todas. Vacía = solo lectura |
-| `CRON_SECRET` | Lo manda Vercel al cron diario del motor. Vacía = el cron no corre nada |
+| `CRON_SECRET` | Secreto de `/api/lezgo-ia/cron`: lo manda quien programe el motor (Make o el cron de Vercel). Vacía = la ruta no corre nada |
 | `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados
