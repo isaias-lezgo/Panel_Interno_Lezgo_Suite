@@ -1,5 +1,6 @@
 import type { Thread } from "@/data/lezgo-ia"
 
+import { parseInbound } from "./assistant"
 import { alertKindLabel, type AlertKind } from "./engine"
 
 /**
@@ -77,7 +78,10 @@ function questionThread(
   asked: NotificationRow,
   reply: NotificationRow | undefined,
 ): Thread {
-  const subject = asked.body.replace(/\s+/g, " ").trim()
+  // Los renglones de antes guardaron el mensaje como lo entrega GoGHL, con
+  // lo citado y el pie de "Received on": aquí se muestra solo lo escrito.
+  const text = parseInbound(asked.body).text
+  const subject = text.replace(/\s+/g, " ").trim()
   return {
     id,
     subaccountId: asked.ghlLocationId,
@@ -95,7 +99,7 @@ function questionThread(
         }
       : {}),
     messages: [
-      { id: asked.id, from: "advisor", text: asked.body, at: iso(asked.createdAt) },
+      { id: asked.id, from: "advisor", text, at: iso(asked.createdAt) },
       ...(reply
         ? [{ id: reply.id, from: "ia" as const, text: reply.body, at: iso(reply.createdAt) }]
         : []),

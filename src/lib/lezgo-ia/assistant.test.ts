@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { cleanBody, leadScope, pendingQuestion, transcript, type ChatMessage } from "./assistant"
+import {
+  cleanBody,
+  leadScope,
+  parseInbound,
+  pendingQuestion,
+  transcript,
+  type ChatMessage,
+} from "./assistant"
 
 let n = 0
 const msg = (direction: ChatMessage["direction"], body: string, patch: Partial<ChatMessage> = {}): ChatMessage => ({
@@ -16,6 +23,32 @@ describe("cleanBody", () => {
   it("quita la etiqueta de instancia de GoGHL", () => {
     expect(cleanBody("{WA#2} Hola Ana")).toBe("Hola Ana")
     expect(cleanBody(undefined)).toBe("")
+  })
+})
+
+describe("parseInbound", () => {
+  const wrapped =
+    "↩️ Replied to: [Prueba → Angel Chavez · admin]\n\nHola Angel.\n• Silvia: 12 días sin contestar \n\n↪️ Message: Cual es prioridad?\n\n📱 [Received on Isaías Ríos (+5214429315445)]"
+
+  it("separa lo escrito de lo citado y quita el pie de GoGHL", () => {
+    expect(parseInbound(wrapped)).toEqual({
+      text: "Cual es prioridad?",
+      quoted: "[Prueba → Angel Chavez · admin]\n\nHola Angel.\n• Silvia: 12 días sin contestar",
+    })
+  })
+
+  it("un mensaje normal queda igual, sin el pie", () => {
+    expect(parseInbound("hola\n\n📱 [Received on Isaías Ríos (+5214429315445)]")).toEqual({
+      text: "hola",
+      quoted: null,
+    })
+  })
+
+  it("la pregunta guarda lo escrito y el modelo ve también lo citado", () => {
+    const q = pendingQuestion([{ id: "m", direction: "inbound", body: wrapped, dateAdded: "2026-11-10T05:54:35.024Z" }])
+    expect(q?.text).toBe("Cual es prioridad?")
+    expect(q?.prompt).toContain("«[Prueba → Angel Chavez · admin]")
+    expect(q?.prompt.endsWith("Cual es prioridad?")).toBe(true)
   })
 })
 

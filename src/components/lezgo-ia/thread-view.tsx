@@ -24,8 +24,8 @@ export const deliveryLabel = {
 } as const
 
 /**
- * Un hilo IA ↔ asesor, con el mismo lenguaje visual que el copiloto: avatar a
- * la izquierda, texto a la derecha, las propuestas de la IA como botones. El
+ * Un hilo IA ↔ asesor en globos, para ver de un vistazo quién dijo qué: la IA a
+ * la izquierda, el asesor a la derecha, las propuestas de la IA como botones. El
  * cuadro de abajo agrega mensajes solo en memoria, y solo en el demo: un
  * hilo real (`readOnly`) es lo que mandó el motor, sin caja para contestar.
  */
@@ -184,31 +184,40 @@ function Message({
   const chosen = message.actions?.find((a) => a.chosen)
   const pending = message.actions && !chosen
 
+  // La IA a la izquierda y con tinte de marca; el asesor a la derecha y en
+  // gris. Lado, relleno y nombre dicen lo mismo: no depende solo del color.
   return (
-    <article className="flex gap-3">
-      <span
-        aria-hidden
+    <article className={cn("flex flex-col gap-1.5", fromIa ? "items-start" : "items-end")}>
+      <p className={cn("flex items-center gap-2", !fromIa && "flex-row-reverse")}>
+        <span
+          aria-hidden
+          className={cn(
+            "num grid size-6 shrink-0 place-items-center rounded-full text-[10px] font-medium",
+            fromIa ? "bg-primary text-primary-foreground" : "bg-secondary",
+          )}
+        >
+          {fromIa ? "IA" : initials(advisor.name)}
+        </span>
+        <span className="text-xs font-medium">
+          {fromIa ? "Lezgo IA" : advisor.name}
+        </span>
+        <time
+          dateTime={message.at}
+          className="num text-[11px] text-muted-foreground"
+        >
+          {clockTime(message.at)}
+        </time>
+      </p>
+
+      <div
         className={cn(
-          "num mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-[10px] font-medium",
-          fromIa ? "bg-primary text-primary-foreground" : "bg-secondary",
+          "max-w-[88%] min-w-0 rounded-lg border px-3.5 py-2.5",
+          fromIa
+            ? "rounded-tl-sm border-primary/25 bg-primary/10"
+            : "rounded-tr-sm border-border bg-secondary",
         )}
       >
-        {fromIa ? "IA" : initials(advisor.name)}
-      </span>
-
-      <div className="min-w-0 flex-1">
-        <p className="flex items-baseline gap-2">
-          <span className="text-xs font-medium">
-            {fromIa ? "Lezgo IA" : advisor.name}
-          </span>
-          <time
-            dateTime={message.at}
-            className="num text-[11px] text-muted-foreground"
-          >
-            {clockTime(message.at)}
-          </time>
-        </p>
-        <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">
+        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
           {message.text}
         </p>
 

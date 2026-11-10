@@ -160,7 +160,7 @@ export async function answerInbound(
       }),
       stopWhen: stepCountIs(MAX_STEPS),
     })
-    answer = (await agent.generate({ prompt: question.text })).text.trim()
+    answer = (await agent.generate({ prompt: question.prompt })).text.trim()
     if (!answer) throw new Error("El modelo no devolvió texto.")
   } catch (error) {
     // Sin respuesta no se mandó nada: se suelta la pregunta para poder reintentar.

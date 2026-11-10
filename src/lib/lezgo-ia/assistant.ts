@@ -23,6 +23,31 @@ export function cleanBody(body: string | undefined) {
 }
 
 /**
+ * Lo que de verdad escribió la persona. Cuando alguien contesta citando un
+ * mensaje, GoGHL lo entrega envuelto:
+ *
+ *   ↩️ Replied to: <el mensaje citado, entero>
+ *
+ *   ↪️ Message: <lo que escribió>
+ *
+ *   📱 [Received on Isaías Ríos (+52…)]
+ *
+ * Aquí se separan: `text` es lo escrito y `quoted` lo citado. El pie de
+ * "Received on" se quita siempre.
+ */
+export function parseInbound(body: string | undefined): { text: string; quoted: string | null } {
+  const clean = cleanBody(body)
+    .replace(/\n*📱 \[Received on [^\]]*\]\s*$/u, "")
+    .trim()
+  const match = /^↩️ Replied to:\s*([\s\S]*?)\n\s*↪️ Message:\s*([\s\S]*)$/u.exec(clean)
+  if (!match) return { text: clean, quoted: null }
+  return { text: match[2].trim(), quoted: match[1].trim() || null }
+}
+
+/** Cuánto de un mensaje citado se le pasa al modelo: basta para saber cuál era. */
+const MAX_QUOTED = 400
+
+/**
  * Los mensajes de texto del hilo. Fuera llamadas, correos y la actividad
  * que GHL anota como mensaje; fuera también lo que no trae texto.
  */
@@ -44,13 +69,20 @@ export function pendingQuestion(messages: ChatMessage[]) {
     pending.push(m)
   }
   if (pending.length === 0) return null
+  const parts = [...pending].reverse().map((m) => parseInbound(m.body))
   return {
     /** El más reciente: identifica la pregunta para no contestarla dos veces. */
     id: pending[0].id,
     at: pending[0].dateAdded,
-    text: pending
-      .reverse()
-      .map((m) => cleanBody(m.body).slice(0, MAX_BODY))
+    /** Lo que escribió, sin lo citado: es lo que se guarda y se muestra. */
+    text: parts.map((p) => p.text.slice(0, MAX_BODY)).join("\n"),
+    /** Lo mismo, con el mensaje que citó al frente: es lo que lee el modelo. */
+    prompt: parts
+      .map((p) =>
+        p.quoted
+          ? `(Contesta citando este mensaje tuyo: «${p.quoted.slice(0, MAX_QUOTED)}${p.quoted.length > MAX_QUOTED ? "…" : ""}»)\n${p.text.slice(0, MAX_BODY)}`
+          : p.text.slice(0, MAX_BODY),
+      )
       .join("\n"),
     count: pending.length,
   }
@@ -62,7 +94,7 @@ export function transcript(messages: ChatMessage[], skip: number, limit = 12) {
     .slice(skip, skip + limit)
     .reverse()
     .map((m) => {
-      const body = cleanBody(m.body)
+      const body = m.direction === "inbound" ? parseInbound(m.body).text : cleanBody(m.body)
       const text = body.length > MAX_BODY ? `${body.slice(0, MAX_BODY)}…` : body
       return `${m.direction === "inbound" ? "ASESOR" : "TÚ"}: ${text}`
     })
