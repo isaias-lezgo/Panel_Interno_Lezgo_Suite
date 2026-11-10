@@ -3,6 +3,7 @@ import "server-only"
 import { db, schema } from "@/db"
 import { GhlError, type GhlClient, type GhlOpportunity } from "@/lib/ghl/client"
 import { ghlFor } from "@/lib/ghl/for-location"
+import { createPacedReader } from "@/lib/ghl/pace"
 import { lezgoSuiteEnabled, sendWhatsApp } from "@/lib/ghl/lezgo-suite"
 import { mapLimit } from "@/lib/map-limit"
 import { getLezgoIaConfig, getLezgoIaData, getSentNotificationKeys } from "@/lib/repository"
@@ -12,6 +13,7 @@ import {
   composeMessage,
   detectAlerts,
   planDeliveries,
+  splitMessage,
   type EngineOpportunity,
 } from "./engine"
 
@@ -34,8 +36,12 @@ import {
 const MAX_OPPORTUNITIES = 500
 /** Mensajes por corrida: en pruebas todos caen en el mismo teléfono. */
 const MAX_MESSAGES = 10
-/** Llamadas simultáneas a GHL al leer conversaciones. */
-const CONCURRENCY = 6
+/**
+ * Llamadas simultáneas a GHL al leer conversaciones. El ritmo lo pone
+ * `createPacedReader` (80 cada 10 s, bajo el límite de 100 de GHL); esto
+ * solo acota los sockets abiertos.
+ */
+const CONCURRENCY = 4
 
 export type RunSummary = {
   ok: true
@@ -51,6 +57,8 @@ export type RunSummary = {
   /** Destinatarios que quedan para la siguiente corrida por el tope de mensajes. */
   postponed: number
   deferred: number
+  /** Oportunidades que quedan para la siguiente corrida por el tope de 50. */
+  held: number
   alreadySent: number
   skipped: Partial<Record<SkipReason, number>>
 }
@@ -87,6 +95,7 @@ export async function runLezgoIa(
     messages: [],
     postponed: 0,
     deferred: 0,
+    held: 0,
     alreadySent: 0,
     skipped: {},
   }
@@ -94,11 +103,15 @@ export async function runLezgoIa(
   if (summary.inactive) return summary
 
   let opportunities: EngineOpportunity[]
+  let totalOpen = 0
   try {
     const client = await ghlFor(locationId)
-    const read = await readOpportunities(client, locationId)
+    // Un solo ritmo para toda la corrida: páginas, conversaciones y mensajes.
+    const paced = createPacedReader()
+    const read = await readOpportunities(client, locationId, paced)
     summary.truncated = read.truncated
-    opportunities = await withConversations(client, locationId, read.opportunities)
+    totalOpen = read.total
+    opportunities = await withConversations(client, locationId, read.opportunities, paced)
   } catch (error) {
     console.error(`El motor de Lezgo IA no leyó ${locationId}`, error)
     const detail = error instanceof GhlError ? ` (${error.status}: ${error.message})` : ""
@@ -113,6 +126,7 @@ export async function runLezgoIa(
     pipelines: account.pipelines,
     advisors: account.advisors,
     opportunities,
+    totalOpen,
   })
   summary.alerts = alerts.length
 
@@ -127,6 +141,7 @@ export async function runLezgoIa(
     sentKeys,
   })
   summary.deferred = plan.deferred.length
+  summary.held = plan.held
   summary.alreadySent = plan.alreadySent
   for (const { reason } of plan.skipped) {
     summary.skipped[reason] = (summary.skipped[reason] ?? 0) + 1
@@ -143,7 +158,13 @@ export async function runLezgoIa(
     let error: string | null = null
     if (testContactId) {
       try {
-        ghlMessageId = (await sendWhatsApp(testContactId, body)).messageId
+        // Un mensaje largo sale en partes: GoGHL rompe los que pasan de ~940
+        // caracteres. Si una parte falla, el aviso queda `failed` y se
+        // reintenta entero en la siguiente corrida.
+        for (const part of splitMessage(body)) {
+          const { messageId } = await sendWhatsApp(testContactId, part)
+          ghlMessageId ??= messageId
+        }
         status = "sent"
       } catch (e) {
         status = "failed"
@@ -182,23 +203,27 @@ export async function runLezgoIa(
 
 /* ----------------------------------------------------------------- lectura */
 
-async function readOpportunities(client: GhlClient, locationId: string) {
+type PacedReader = ReturnType<typeof createPacedReader>
+
+async function readOpportunities(client: GhlClient, locationId: string, paced: PacedReader) {
   const all: GhlOpportunity[] = []
   let cursor: { startAfter?: number; startAfterId?: string } = {}
   let total = 0
   while (all.length < MAX_OPPORTUNITIES) {
-    const page = await client.searchOpportunities({
-      locationId,
-      status: "open",
-      limit: 100,
-      ...cursor,
-    })
+    const page = await paced(() =>
+      client.searchOpportunities({
+        locationId,
+        status: "open",
+        limit: 100,
+        ...cursor,
+      }),
+    )
     all.push(...page.opportunities)
     total = page.meta.total
     if (!page.meta.startAfterId || page.opportunities.length === 0 || all.length >= total) break
     cursor = { startAfter: page.meta.startAfter, startAfterId: page.meta.startAfterId }
   }
-  return { opportunities: all, truncated: total > all.length }
+  return { opportunities: all, total, truncated: total > all.length }
 }
 
 /**
@@ -211,6 +236,7 @@ async function withConversations(
   client: GhlClient,
   locationId: string,
   opportunities: GhlOpportunity[],
+  paced: PacedReader,
 ): Promise<EngineOpportunity[]> {
   const now = Date.now()
   return mapLimit(opportunities, CONCURRENCY, async (opp) => {
@@ -218,6 +244,7 @@ async function withConversations(
       id: opp.id,
       name: opp.name,
       contactName: opp.contact?.name?.trim() || opp.name,
+      contactId: opp.contactId ?? null,
       pipelineId: opp.pipelineId,
       stageId: opp.pipelineStageId,
       assignedTo: opp.assignedTo || null,
@@ -227,11 +254,10 @@ async function withConversations(
     }
     if (!opp.contactId) return base
 
-    const { conversations } = await client.searchConversations({
-      locationId,
-      contactId: opp.contactId,
-      limit: 1,
-    })
+    const contactId = opp.contactId
+    const { conversations } = await paced(() =>
+      client.searchConversations({ locationId, contactId, limit: 1 }),
+    )
     const conv = conversations[0]
     if (conv?.lastMessageDate && conv.lastMessageDirection) {
       base.conversation = {
@@ -250,7 +276,7 @@ async function withConversations(
     ) {
       base.firstContactAt = base.conversation.lastMessageAt
     } else {
-      const { messages } = await client.listMessages(conv.id, 50)
+      const { messages } = await paced(() => client.listMessages(conv.id, 50))
       const first = messages.messages
         .filter(
           (m) =>

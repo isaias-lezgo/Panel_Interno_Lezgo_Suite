@@ -354,7 +354,30 @@ número usado. `type: "WhatsApp"` es el canal oficial de Meta, otro número.
 todo llega a ese contacto con el destinatario real en el encabezado; sin
 ella la corrida es simulada.
 
-**Modelo.** `src/lib/ai/agent.ts` resuelve el modelo por dos caminos: con
+**Asistente de Lezgo IA** (`src/lib/lezgo-ia/reply.ts`). La mitad que
+conversa: cuando alguien contesta un aviso por WhatsApp, el webhook de la
+app OAuth llama a `/api/lezgo-ia/entrada` y un `ToolLoopAgent` responde por
+el mismo número. La app está instalada en toda la agencia, así que ahí cae
+el `InboundMessage` de **todas** las subcuentas: la ruta descarta en sus
+primeras líneas lo que no sea de Lezgo Suite y del contacto de pruebas, con
+200 (un no-2xx se reintenta hasta 12 veces) y sin guardar nada. Entra con la
+firma de GHL (`X-GHL-Signature`, Ed25519; `src/lib/ghl/webhook-signature.ts`)
+o con `LEZGO_IA_WEBHOOK_SECRET`.
+El motor sigue decidiendo con código cuándo avisar; el modelo solo entra
+cuando el asesor escribe. Del webhook se usa nada más el id del contacto: la
+pregunta se lee de la conversación en GHL. **Solo contesta al contacto de
+pruebas**, que hace de la última persona a la que el motor le escribió (su
+subcuenta y su rol salen de la bitácora); al 442 931 5445 también le
+escriben clientes. Sus herramientas (`assistant-tools.ts`) son de solo
+lectura y nacen atadas a una subcuenta y a un alcance —gerente y admin ven
+todo, un usuario según "Qué puede consultar cada rol"—: el modelo no los
+elige. Respeta "Responder preguntas del asesor". Cada intercambio queda en
+`lezgo_ia_notifications` como dos renglones, `question` y `reply`; el de la
+pregunta usa el id del mensaje como llave primaria, así un webhook repetido
+no contesta dos veces. Con `?simular=1` la ruta devuelve la respuesta sin
+mandarla ni anotarla.
+
+**Modelo.** `src/lib/ai/model.ts` resuelve el modelo por dos caminos: con
 `ANTHROPIC_API_KEY` habla directo con Anthropic; sin ella usa el AI Gateway con
 el identificador `proveedor/modelo`. Los créditos **gratis** del Gateway no
 sirven — devuelven "Free tier users do not have access to this model" incluso
@@ -406,7 +429,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 18 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, hora, reintento y sesión
+pnpm test         # vitest, 21 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
@@ -434,6 +457,7 @@ devuelven un error explicado en la interfaz.
 | `STRIPE_FX_USD_MXN` | Tipo de cambio USD→MXN para normalizar los KPI |
 | `BLOB_READ_WRITE_TOKEN` | Blob privado de las imágenes de las notas. Lo pone Vercel al conectar el store |
 | `LEZGO_IA_TEST_CONTACT_ID` | Contacto de Lezgo Suite al que llegan todos los avisos del motor en pruebas. Vacía = simulado |
+| `LEZGO_IA_WEBHOOK_SECRET` | Secreto alterno del webhook de mensajes entrantes (`x-lezgo-ia-secret` o `?secreto=`) y el único que abre `?simular=1`. Vacía = solo entra la firma de GHL |
 | `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados
@@ -448,7 +472,9 @@ devuelven un error explicado en la interfaz.
   `/entrar` con `PANEL_USER` y `PANEL_PASSWORD`, y una cookie `httpOnly`
   firmada de 30 días (`src/lib/auth/session.ts`). La llave sale de la
   contraseña: cambiarla cierra todas las sesiones. Sin sesión, las páginas
-  redirigen a `/entrar?next=` y las APIs responden 401. En producción, sin `PANEL_PASSWORD` no
+  redirigen a `/entrar?next=` y las APIs responden 401. La única excepción es
+  el `POST` a `/api/lezgo-ia/entrada`, el webhook de GHL, que exige la firma
+  de GHL o `LEZGO_IA_WEBHOOK_SECRET`. En producción, sin `PANEL_PASSWORD` no
   entra nadie. La protección de Vercel del proyecto es la estándar, que **no**
   cubre el dominio de producción: el candado es lo único que lo cierra. No lo
   quites ni lo relajes sin reemplazo.

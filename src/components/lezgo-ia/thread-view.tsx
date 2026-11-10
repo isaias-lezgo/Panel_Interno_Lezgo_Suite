@@ -17,19 +17,28 @@ import {
 import { initials } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
+export const deliveryLabel = {
+  sent: { label: "Enviado", tone: "live" },
+  failed: { label: "No salió", tone: "risk" },
+  simulated: { label: "Simulado", tone: "idle" },
+} as const
+
 /**
  * Un hilo IA ↔ asesor, con el mismo lenguaje visual que el copiloto: avatar a
  * la izquierda, texto a la derecha, las propuestas de la IA como botones. El
- * cuadro de abajo agrega mensajes solo en memoria.
+ * cuadro de abajo agrega mensajes solo en memoria, y solo en el demo: un
+ * hilo real (`readOnly`) es lo que mandó el motor, sin caja para contestar.
  */
 export function ThreadView({
   thread,
   account,
   advisor,
   now,
+  readOnly = false,
   onChange,
 }: {
   now: string
+  readOnly?: boolean
   thread: Thread
   account: Subaccount
   advisor: Advisor
@@ -80,6 +89,11 @@ export function ThreadView({
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">{thread.subject}</h2>
           <StatusChip tone={kind.tone}>{kind.label}</StatusChip>
+          {thread.delivery && (
+            <StatusChip tone={deliveryLabel[thread.delivery.status].tone}>
+              {deliveryLabel[thread.delivery.status].label}
+            </StatusChip>
+          )}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           {advisor.name} · {advisor.role === "admin" ? "Admin" : "Usuario"} ·{" "}
@@ -91,6 +105,17 @@ export function ThreadView({
             </>
           )}
         </p>
+        {thread.delivery?.status === "simulated" && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Corrida simulada: este mensaje no se mandó a nadie.
+          </p>
+        )}
+        {thread.delivery?.status === "failed" && (
+          <p className="mt-1 text-xs text-status-risk">
+            GoHighLevel no lo mandó
+            {thread.delivery.error ? `: ${thread.delivery.error}` : "."}
+          </p>
+        )}
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5">
@@ -104,42 +129,44 @@ export function ThreadView({
         ))}
       </div>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          append(draft)
-        }}
-        className="border-t border-border p-3"
-      >
-        <div className="flex items-end gap-2">
-          <Textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                append(draft)
-              }
-            }}
-            rows={1}
-            placeholder={`Responder como ${advisor.name.split(" ")[0]}…`}
-            aria-label="Responder en el hilo"
-            className="max-h-32 min-h-9 resize-none"
-          />
-          <Button
-            type="submit"
-            size="icon"
-            disabled={!draft.trim()}
-            aria-label="Enviar respuesta"
-          >
-            <ArrowUpIcon />
-          </Button>
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Vista previa: la respuesta se queda en esta pantalla, no llega al
-          asesor.
-        </p>
-      </form>
+      {!readOnly && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            append(draft)
+          }}
+          className="border-t border-border p-3"
+        >
+          <div className="flex items-end gap-2">
+            <Textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  append(draft)
+                }
+              }}
+              rows={1}
+              placeholder={`Responder como ${advisor.name.split(" ")[0]}…`}
+              aria-label="Responder en el hilo"
+              className="max-h-32 min-h-9 resize-none"
+            />
+            <Button
+              type="submit"
+              size="icon"
+              disabled={!draft.trim()}
+              aria-label="Enviar respuesta"
+            >
+              <ArrowUpIcon />
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Vista previa: la respuesta se queda en esta pantalla, no llega al
+            asesor.
+          </p>
+        </form>
+      )}
     </section>
   )
 }
@@ -174,7 +201,10 @@ function Message({
           <span className="text-xs font-medium">
             {fromIa ? "Lezgo IA" : advisor.name}
           </span>
-          <time dateTime={message.at} className="num text-[11px] text-muted-foreground">
+          <time
+            dateTime={message.at}
+            className="num text-[11px] text-muted-foreground"
+          >
             {clockTime(message.at)}
           </time>
         </p>

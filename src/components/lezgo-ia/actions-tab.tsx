@@ -106,7 +106,9 @@ export function ActionsTab({ data }: { data: LezgoIaData }) {
         {byDay.length === 0 ? (
           rows.length === 0 ? (
             <EmptyState title="Sin acciones todavía">
-              La IA no ha hecho nada en GoHighLevel: aún no corre en ninguna subcuenta.
+              {data.source === "ghl"
+                ? "El motor por ahora solo avisa por WhatsApp: no mueve etapas ni crea tareas en GoHighLevel. Lo que mandó está en Mensajes."
+                : "La IA no ha hecho nada en GoHighLevel."}
             </EmptyState>
           ) : (
             <EmptyState title="Ninguna acción coincide">Cambia el filtro.</EmptyState>

@@ -28,6 +28,7 @@ import {
   type StoredStageRules,
 } from "@/lib/lezgo-ia/config"
 import { advisorUsers, toSubaccount } from "@/lib/lezgo-ia/from-ghl"
+import { threadsFromNotifications, weeklySentBySubaccount } from "@/lib/lezgo-ia/log"
 import type { IaStatus, SettingValues, Voice } from "@/data/lezgo-ia"
 import {
   fetchCobranzaInput,
@@ -1222,11 +1223,18 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
     const configs = await getLezgoIaConfigs(
       subaccounts.map((s) => ({ locationId: s.id, timezone: s.timezone })),
     )
+    const now = new Date()
+    const threads = await getLezgoIaThreads(subaccounts.map((s) => s.id))
+    const weekly = weeklySentBySubaccount(threads, now)
     return {
       source: "ghl",
-      now: new Date().toISOString(),
-      subaccounts: subaccounts.map((s) => applyConfig(s, configs.get(s.id))),
-      threads: [],
+      now: now.toISOString(),
+      subaccounts: subaccounts.map((s) => ({
+        ...applyConfig(s, configs.get(s.id)),
+        weeklyMessages: weekly.get(s.id) ?? 0,
+      })),
+      threads,
+      // El motor todavía solo avisa: no hace nada en GHL que anotar aquí.
       actions: [],
       failed,
       inactive,
@@ -1293,6 +1301,65 @@ export async function getLezgoIaConfig(
 ): Promise<AccountConfig> {
   const configs = await getLezgoIaConfigs([{ locationId, timezone }])
   return configs.get(locationId) ?? defaultAccountConfig(locationId, timezone)
+}
+
+/** Renglones de la bitácora que se leen para la pestaña Mensajes. */
+const MAX_NOTIFICATION_ROWS = 1500
+
+/**
+ * Lo que el motor de Lezgo IA mandó (o habría mandado) en estas subcuentas,
+ * un hilo por WhatsApp, lo más reciente primero. Si la bitácora no se puede
+ * leer, la vista sigue en pie sin mensajes.
+ */
+export async function getLezgoIaThreads(locationIds: string[]) {
+  if (!db || locationIds.length === 0) return []
+  try {
+    const rows = await db
+      .select({
+        id: schema.lezgoIaNotifications.id,
+        ghlLocationId: schema.lezgoIaNotifications.ghlLocationId,
+        runId: schema.lezgoIaNotifications.runId,
+        kind: schema.lezgoIaNotifications.kind,
+        recipient: schema.lezgoIaNotifications.recipient,
+        recipientName: schema.lezgoIaNotifications.recipientName,
+        status: schema.lezgoIaNotifications.status,
+        body: schema.lezgoIaNotifications.body,
+        error: schema.lezgoIaNotifications.error,
+        createdAt: schema.lezgoIaNotifications.createdAt,
+      })
+      .from(schema.lezgoIaNotifications)
+      .where(inArray(schema.lezgoIaNotifications.ghlLocationId, locationIds))
+      .orderBy(desc(schema.lezgoIaNotifications.createdAt))
+      .limit(MAX_NOTIFICATION_ROWS)
+    return threadsFromNotifications(rows)
+  } catch (error) {
+    console.error("No se leyó la bitácora de Lezgo IA", error)
+    return []
+  }
+}
+
+/**
+ * El último aviso que el motor le mandó a este contacto de pruebas: dice a
+ * quién representa ese número cuando contesta (subcuenta y destinatario).
+ */
+export async function getLastNotificationTo(testContactId: string) {
+  if (!db) return null
+  const [row] = await db
+    .select({
+      ghlLocationId: schema.lezgoIaNotifications.ghlLocationId,
+      recipient: schema.lezgoIaNotifications.recipient,
+      recipientName: schema.lezgoIaNotifications.recipientName,
+    })
+    .from(schema.lezgoIaNotifications)
+    .where(
+      and(
+        eq(schema.lezgoIaNotifications.testContactId, testContactId),
+        eq(schema.lezgoIaNotifications.status, "sent"),
+      ),
+    )
+    .orderBy(desc(schema.lezgoIaNotifications.createdAt))
+    .limit(1)
+  return row ?? null
 }
 
 /**

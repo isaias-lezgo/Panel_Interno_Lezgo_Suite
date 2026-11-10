@@ -1,31 +1,13 @@
 import "server-only"
 
-import { anthropic } from "@ai-sdk/anthropic"
 import { InferAgentUIMessage, ToolLoopAgent, stepCountIs } from "ai"
 
+import { model } from "@/lib/ai/model"
 import { copilotTools } from "@/lib/ai/tools"
 import { TIME_ZONE } from "@/lib/time"
 
-/**
- * Se puede cambiar sin tocar código con COPILOT_MODEL en .env.local.
- */
-export const COPILOT_MODEL =
-  process.env.COPILOT_MODEL ?? "anthropic/claude-sonnet-5"
-
-/**
- * Dos caminos hacia el modelo:
- *
- * 1. Con ANTHROPIC_API_KEY se habla directo con la API de Anthropic. No pasa
- *    por el AI Gateway, así que no depende de los créditos de Vercel.
- * 2. Sin ella, se usa el AI Gateway con el identificador completo
- *    ("proveedor/modelo"). Requiere créditos comprados: los créditos gratis
- *    responden "Free tier users do not have access to this model".
- */
-export const usingDirectAnthropic = Boolean(process.env.ANTHROPIC_API_KEY)
-
-const model = usingDirectAnthropic
-  ? anthropic(COPILOT_MODEL.replace(/^anthropic\//, ""))
-  : COPILOT_MODEL
+// El modelo y cómo se llega a él viven en `model.ts`.
+export { COPILOT_MODEL, usingDirectAnthropic } from "@/lib/ai/model"
 
 const instructions = `Eres el copiloto de Lezgo Suite y trabajas dentro del panel interno de la agencia.
 

@@ -28,6 +28,8 @@ export type EngineOpportunity = {
   id: string
   name: string
   contactName: string
+  /** Dos oportunidades del mismo contacto comparten conversación. */
+  contactId: string | null
   pipelineId: string
   stageId: string
   assignedTo: string | null
@@ -61,7 +63,14 @@ export type Alert = {
   /** Id de GHL del asesor, o "manager". */
   userId: string
   line: string
+  /** La oportunidad de la que habla; el resumen del día no tiene. */
+  opportunityId?: string
 }
+
+/** Oportunidades de las que se avisa por corrida. Las demás, en la siguiente. */
+export const MAX_FLAGGED = 50
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 export const alertKindLabel: Record<AlertKind, string> = {
   newLeadUntouched: "Lead nuevo sin primer contacto",
@@ -95,7 +104,9 @@ export function elapsed(ms: number) {
  * - **Etapa sin movimiento**: lleva en su etapa más de lo que tolera la
  *   regla de esa etapa; la acción de la regla dice a quién y qué proponer.
  * - **Resumen del día** al gerente, pasada la hora configurada.
- * Un lead sin asignar se le avisa al gerente.
+ * Un lead sin asignar se le avisa al gerente. Un contacto con dos
+ * oportunidades tiene una sola conversación: lo que sale de ella —lead
+ * nuevo, sin contestar, perdido— se dice una vez, no una por oportunidad.
  */
 export function detectAlerts(input: {
   now: Date
@@ -103,8 +114,11 @@ export function detectAlerts(input: {
   pipelines: Pipeline[]
   advisors: Advisor[]
   opportunities: EngineOpportunity[]
+  /** Abiertas en GHL, si son más de las que se leyeron. */
+  totalOpen?: number
 }): Alert[] {
   const { now, account, pipelines, opportunities } = input
+  const told = new Set<string>()
   const advisorName = new Map(input.advisors.map((a) => [a.id, a.name]))
   const at = now.getTime()
   const stageName = new Map(
@@ -120,13 +134,21 @@ export function detectAlerts(input: {
     const settings = resolveAdvisor(account, owner).settings
     const option = (id: string, fallback: number) =>
       Number(settings[id]?.option ?? fallback) || fallback
+    /** Verdadero la primera vez que este contacto da este aviso a esta persona. */
+    const once = (topic: string) => {
+      const key = `${topic}:${opp.contactId ?? opp.id}:${owner}`
+      if (told.has(key)) return false
+      told.add(key)
+      return true
+    }
 
     // Lead nuevo sin primer contacto.
     const age = at - Date.parse(opp.createdAt)
     if (
       opp.firstContactAt === null &&
       age >= option("newLeadUntouched", 30) * MIN &&
-      age < DAY
+      age < DAY &&
+      once("new")
     ) {
       alerts.push({
         key: `new:${opp.id}`,
@@ -134,6 +156,7 @@ export function detectAlerts(input: {
         settingId: "newLeadUntouched",
         userId: owner,
         line: `${who}: entró hace ${elapsed(age)}`,
+        opportunityId: opp.id,
       })
     }
 
@@ -141,22 +164,18 @@ export function detectAlerts(input: {
     const conv = opp.conversation
     if (conv?.lastDirection === "outbound") {
       const silence = at - Date.parse(conv.lastMessageAt)
-      const lostOn = settings.suggestLost?.enabled === true
-      if (lostOn && silence >= option("suggestLost", 7) * DAY) {
+      const lost =
+        settings.suggestLost?.enabled === true && silence >= option("suggestLost", 7) * DAY
+      const abandoned = !lost && silence >= option("abandonedLead", 48) * HOUR
+      // El encabezado del bloque ya dice qué se propone: el renglón no lo repite.
+      if ((lost || abandoned) && once("silence")) {
         alerts.push({
-          key: `lost:${opp.id}:${conv.lastMessageAt}`,
-          kind: "suggestLost",
-          settingId: "suggestLost",
-          userId: owner,
-          line: `${who}: ${elapsed(silence)} sin contestar. ¿Lo pasamos a perdido?`,
-        })
-      } else if (silence >= option("abandonedLead", 48) * HOUR) {
-        alerts.push({
-          key: `abandoned:${opp.id}:${conv.lastMessageAt}`,
-          kind: "abandonedLead",
-          settingId: "abandonedLead",
+          key: `${lost ? "lost" : "abandoned"}:${opp.id}:${conv.lastMessageAt}`,
+          kind: lost ? "suggestLost" : "abandonedLead",
+          settingId: lost ? "suggestLost" : "abandonedLead",
           userId: owner,
           line: `${who}: ${elapsed(silence)} sin contestar`,
+          opportunityId: opp.id,
         })
       }
     }
@@ -183,11 +202,12 @@ export function detectAlerts(input: {
         settingId: null,
         userId: rule.action === "manager" ? "manager" : owner,
         line,
+        opportunityId: opp.id,
       })
     }
   }
 
-  const summary = dailySummary({ now, account, opportunities, alerts })
+  const summary = dailySummary({ now, account, opportunities, alerts, totalOpen: input.totalOpen })
   if (summary) alerts.push(summary)
   return alerts
 }
@@ -215,6 +235,7 @@ function dailySummary(input: {
   account: AccountConfig
   opportunities: EngineOpportunity[]
   alerts: Alert[]
+  totalOpen?: number
 }): Alert | null {
   const { now, account, opportunities, alerts } = input
   const setting = resolveAdvisor(account, "manager").settings.dailySummary
@@ -224,11 +245,27 @@ function dailySummary(input: {
   const at = now.getTime()
   const fresh = opportunities.filter((o) => at - Date.parse(o.createdAt) < DAY).length
   const count = (kind: AlertKind) => alerts.filter((a) => a.kind === kind).length
+  const read = opportunities.length
+  const total = Math.max(input.totalOpen ?? read, read)
+  const open =
+    total > read
+      ? `${total} oportunidades abiertas; revisé ${read}`
+      : plural(read, "oportunidad abierta", "oportunidades abiertas")
+  // Avisos que nadie recibe porque su asesor tiene los avisos apagados.
+  const muted = alerts.filter(
+    (a) => a.userId !== "manager" && !resolveAdvisor(account, a.userId).alerts,
+  ).length
   const lines = [
-    `${opportunities.length} oportunidades abiertas, ${fresh} nuevas en las últimas 24 h`,
-    `${count("newLeadUntouched")} leads nuevos sin primer contacto`,
-    `${count("abandonedLead") + count("suggestLost")} leads sin contestar`,
-    `${count("stageIdle")} oportunidades sin movimiento en su etapa`,
+    `${open}, ${plural(fresh, "nueva", "nuevas")} en las últimas 24 h`,
+    plural(count("newLeadUntouched"), "lead nuevo", "leads nuevos") + " sin primer contacto",
+    plural(count("abandonedLead") + count("suggestLost"), "lead", "leads") + " sin contestar",
+    plural(count("stageIdle"), "oportunidad", "oportunidades") + " sin movimiento en su etapa",
+    ...(muted > 0
+      ? [
+          plural(muted, "aviso no sale: es", "avisos no salen: son") +
+            " de asesores con los avisos apagados",
+        ]
+      : []),
   ]
   return {
     key: `summary:${local.date}`,
@@ -250,7 +287,12 @@ export type Recipient = {
   members: string[]
 }
 
-export type Delivery = { recipient: Recipient; alerts: Alert[] }
+export type Delivery = {
+  recipient: Recipient
+  alerts: Alert[]
+  /** Oportunidades suyas que no entraron por el tope de la corrida. */
+  more: number
+}
 
 export type DeliveryPlan = {
   deliveries: Delivery[]
@@ -260,11 +302,17 @@ export type DeliveryPlan = {
   skipped: { alert: Alert; reason: Exclude<NotifyDecision, { send: true }>["reason"] }[]
   /** Ya salieron en una corrida anterior. */
   alreadySent: number
+  /** Oportunidades que quedan para la siguiente corrida por el tope. */
+  held: number
 }
 
 /**
  * Pasa cada aviso por `shouldNotify` y junta los que salen por destinatario.
  * "manager" son los admins de la subcuenta; sin admins, no hay a quién.
+ *
+ * Una corrida avisa de `maxOpportunities` oportunidades a lo sumo, lo más
+ * urgente primero. Las demás no se mandan ni se anotan: como no quedan
+ * `sent`, entran solas en la siguiente corrida.
  */
 export function planDeliveries(input: {
   alerts: Alert[]
@@ -272,14 +320,20 @@ export function planDeliveries(input: {
   advisors: Advisor[]
   at: Date
   sentKeys: Set<string>
+  maxOpportunities?: number
 }): DeliveryPlan {
+  const max = input.maxOpportunities ?? MAX_FLAGGED
   const { account, advisors, at, sentKeys } = input
   const byId = new Map(advisors.map((a) => [a.id, a]))
   const admins = advisors.filter((a) => a.role === "admin")
-  const plan: DeliveryPlan = { deliveries: [], deferred: [], skipped: [], alreadySent: 0 }
+  const plan: DeliveryPlan = { deliveries: [], deferred: [], skipped: [], alreadySent: 0, held: 0 }
   const grouped = new Map<string, Delivery>()
+  const flagged = new Set<string>()
+  const held = new Map<string, Set<string>>()
+  // Por urgencia: si no cabe todo, lo que se queda fuera es lo que más aguanta.
+  const byUrgency = [...input.alerts].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind))
 
-  for (const alert of input.alerts) {
+  for (const alert of byUrgency) {
     if (sentKeys.has(alert.key)) {
       plan.alreadySent++
       continue
@@ -301,12 +355,26 @@ export function planDeliveries(input: {
       plan.skipped.push({ alert, reason: "sin-gerente" })
       continue
     }
-    const delivery = grouped.get(recipient.id) ?? { recipient, alerts: [] }
+    const oppId = alert.opportunityId
+    if (oppId && !flagged.has(oppId)) {
+      if (flagged.size >= max) {
+        const mine = held.get(recipient.id) ?? new Set<string>()
+        mine.add(oppId)
+        held.set(recipient.id, mine)
+        continue
+      }
+      flagged.add(oppId)
+    }
+    const delivery = grouped.get(recipient.id) ?? { recipient, alerts: [], more: 0 }
     delivery.alerts.push(alert)
     grouped.set(recipient.id, delivery)
   }
 
-  plan.deliveries = [...grouped.values()]
+  plan.deliveries = [...grouped.values()].map((d) => ({
+    ...d,
+    more: held.get(d.recipient.id)?.size ?? 0,
+  }))
+  plan.held = new Set([...held.values()].flatMap((ids) => [...ids])).size
   return plan
 }
 
@@ -343,13 +411,12 @@ const order: AlertKind[] = [
   "suggestLost",
 ]
 
-/** Renglones por grupo antes de cortar con "y N más". */
-const MAX_LINES = 8
-
 /**
  * El WhatsApp de un destinatario: un saludo y un bloque por tipo de aviso.
  * En modo prueba arranca con a quién iba de verdad, porque todos llegan al
- * mismo número.
+ * mismo número. Lleva todos sus renglones —el tope de la corrida ya los
+ * acota— porque cada aviso que viaja queda anotado como enviado. Si el tope
+ * dejó oportunidades suyas fuera, lo dice al final.
  */
 export function composeMessage(input: {
   delivery: Delivery
@@ -376,13 +443,67 @@ export function composeMessage(input: {
   for (const kind of order) {
     const lines = delivery.alerts.filter((a) => a.kind === kind).map((a) => a.line)
     if (lines.length === 0) continue
-    const shown = lines.slice(0, MAX_LINES).map((l) =>
-      kind === "dailySummary" ? l : `• ${l}`,
-    )
-    if (lines.length > MAX_LINES) shown.push(`y ${lines.length - MAX_LINES} más`)
+    const shown = lines.map((l) => (kind === "dailySummary" ? l : `• ${l}`))
     const count = kind === "dailySummary" ? "" : ` (${lines.length})`
     parts.push(`*${alertKindLabel[kind]}*${count}\n${shown.join("\n")}`)
   }
 
+  if (delivery.more > 0) {
+    const mine = new Set(delivery.alerts.flatMap((a) => a.opportunityId ?? [])).size
+    const these = mine === 1 ? "esta" : `estas ${mine}`
+    const rest =
+      delivery.more === 1
+        ? "Hay 1 oportunidad más que necesita atención."
+        : `Hay ${delivery.more} oportunidades más que necesitan atención.`
+    const ask =
+      voice?.formality === "usted"
+        ? `Arregle ${these} primero y luego le ayudo con el resto.`
+        : `Arregla ${these} primero y luego te ayudo con el resto.`
+    parts.push(`${rest} ${ask}`)
+  }
+
   return parts.join("\n\n")
+}
+
+/**
+ * Caracteres por WhatsApp. Un mensaje de 1,044 llegó completo a GHL y roto
+ * al teléfono: GoGHL lo cortó cerca del 940 y pegó la cola de otro renglón.
+ * El límite del proveedor no está documentado; 700 deja margen.
+ */
+export const MAX_MESSAGE_CHARS = 700
+
+/**
+ * Parte un mensaje largo en varios que caben en un WhatsApp. Corta entre
+ * bloques (línea en blanco) y, si un bloque solo no cabe, entre renglones;
+ * nunca a media frase, salvo un renglón que por sí solo se pase.
+ */
+export function splitMessage(text: string, max = MAX_MESSAGE_CHARS): string[] {
+  if (text.length <= max) return [text]
+
+  // Piezas con el separador que las une a la anterior.
+  const pieces: { sep: string; text: string }[] = []
+  for (const block of text.split("\n\n")) {
+    if (block.length <= max) {
+      pieces.push({ sep: "\n\n", text: block })
+      continue
+    }
+    block.split("\n").forEach((line, i) => {
+      for (let at = 0; at < line.length || at === 0; at += max) {
+        pieces.push({ sep: i === 0 && at === 0 ? "\n\n" : "\n", text: line.slice(at, at + max) })
+      }
+    })
+  }
+
+  const parts: string[] = []
+  let current = ""
+  for (const piece of pieces) {
+    if (current && current.length + piece.sep.length + piece.text.length > max) {
+      parts.push(current)
+      current = piece.text
+    } else {
+      current = current ? current + piece.sep + piece.text : piece.text
+    }
+  }
+  if (current) parts.push(current)
+  return parts
 }

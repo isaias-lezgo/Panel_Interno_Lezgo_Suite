@@ -87,7 +87,8 @@ export function LezgoIaView({
           <ConfigTab data={data} initialAccount={initialAccount} />
         </TabsContent>
         <TabsContent value="mensajes" className="pt-3">
-          <MessagesTab data={data} />
+          {/* La llave vuelve a sembrar los hilos cuando una corrida agrega uno. */}
+          <MessagesTab key={threads[0]?.id ?? "sin-hilos"} data={data} />
         </TabsContent>
         <TabsContent value="bitacora" className="pt-3">
           <ActionsTab data={data} />

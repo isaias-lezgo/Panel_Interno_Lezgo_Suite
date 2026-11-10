@@ -104,7 +104,10 @@ export async function runLezgoIaNow(
     return { ok: false, error: "Esa subcuenta no está enlazada a ningún cliente." }
   }
   try {
-    return await runLezgoIa(locationId, { repeat: options.repeat === true })
+    const result = await runLezgoIa(locationId, { repeat: options.repeat === true })
+    // Lo que salió ya está en la bitácora: que Mensajes lo muestre sin recargar.
+    refresh()
+    return result
   } catch (error) {
     console.error("El motor de Lezgo IA falló", error)
     return { ok: false, error: "El motor falló a la mitad. Revisa la bitácora antes de repetir." }

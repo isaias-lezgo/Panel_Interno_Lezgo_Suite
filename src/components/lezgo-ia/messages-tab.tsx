@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react"
 import { DownloadIcon, SearchIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { ThreadView } from "@/components/lezgo-ia/thread-view"
+import { deliveryLabel, ThreadView } from "@/components/lezgo-ia/thread-view"
 import { SubaccountSwitcher } from "@/components/lezgo-ia/subaccount-switcher"
 import { EmptyState, Instrument } from "@/components/panel/page-header"
 import { StatusChip } from "@/components/signal/status-chip"
@@ -20,6 +20,7 @@ import {
 import {
   relativeTime,
   threadKindLabel,
+  type Advisor,
   type LezgoIaData,
   type Thread,
   type ThreadKind,
@@ -59,11 +60,22 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
     () => new Map(subaccounts.map((s) => [s.id, s])),
     [subaccounts],
   )
+  // Un hilo del motor puede ir al gerente o a alguien que ya no está en GHL:
+  // ahí se usa el nombre que se guardó al mandar.
   const advisorOf = useCallback(
-    (thread: Thread) =>
+    (thread: Thread): Advisor =>
       accountById
         .get(thread.subaccountId)
-        ?.advisors.find((a) => a.id === thread.advisorId),
+        ?.advisors.find((a) => a.id === thread.advisorId) ?? {
+        id: thread.advisorId,
+        name: thread.recipientName ?? "Asesor",
+        role: thread.advisorId === "manager" ? "admin" : "user",
+        activeLeads: null,
+        responseMinutes: null,
+        lastActiveAt: null,
+        alerts: false,
+        metrics: null,
+      },
     [accountById],
   )
   const [threads, setThreads] = useState<Thread[]>(seed)
@@ -88,7 +100,7 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
       })
       .filter((t) => {
         if (!q) return true
-        const advisor = advisorOf(t)?.name ?? ""
+        const advisor = advisorOf(t).name
         return (
           t.subject.toLowerCase().includes(q) ||
           (t.about ?? "").toLowerCase().includes(q) ||
@@ -175,7 +187,9 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
           {rows.length === 0 ? (
             threads.length === 0 ? (
               <EmptyState title="Sin mensajes todavía">
-                La IA no ha cruzado ningún mensaje con los asesores: aún no corre en ninguna subcuenta.
+                {data.source === "ghl"
+                  ? "El motor no ha mandado ningún aviso. Córrelo desde la configuración de una subcuenta activa."
+                  : "La IA no ha cruzado ningún mensaje con los asesores."}
               </EmptyState>
             ) : (
               <EmptyState title="Ningún hilo coincide">
@@ -225,7 +239,7 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
                               thread.unread ? "font-semibold" : "font-medium",
                             )}
                           >
-                            {advisor?.name ?? "Asesor"}
+                            {advisor.name}
                           </span>
                         </span>
                         <span className="num shrink-0 text-[11px] text-muted-foreground">
@@ -236,7 +250,14 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
                         {thread.subject}
                       </span>
                       <span className="flex items-center justify-between gap-2 pt-1">
-                        <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
+                        <span className="flex items-center gap-1.5">
+                          <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
+                          {thread.delivery && thread.delivery.status !== "sent" && (
+                            <StatusChip tone={deliveryLabel[thread.delivery.status].tone}>
+                              {deliveryLabel[thread.delivery.status].label}
+                            </StatusChip>
+                          )}
+                        </span>
                         {account === "todas" && (
                           <span className="truncate text-[11px] text-muted-foreground">
                             {accountById.get(thread.subaccountId)?.name}
@@ -256,8 +277,9 @@ export function MessagesTab({ data }: { data: LezgoIaData }) {
             key={open.id}
             thread={open}
             account={accountById.get(open.subaccountId)!}
-            advisor={advisorOf(open)!}
+            advisor={advisorOf(open)}
             now={now}
+            readOnly={data.source === "ghl"}
             onChange={(update) => patchThread(open.id, update)}
           />
         ) : (

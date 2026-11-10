@@ -141,6 +141,12 @@ function RunResultView({ result }: { result: RunSummary }) {
         {result.deferred > 0 && (
           <li>{result.deferred} en espera por horario: salen en la siguiente corrida que caiga en horario.</li>
         )}
+        {result.held > 0 && (
+          <li>
+            {result.held} oportunidades más necesitan atención: salen en la siguiente corrida (tope
+            de 50 por corrida).
+          </li>
+        )}
         {result.alreadySent > 0 && <li>{result.alreadySent} ya se habían mandado antes.</li>}
         {result.postponed > 0 && (
           <li>{result.postponed} destinatarios quedan para la siguiente corrida (tope de mensajes).</li>

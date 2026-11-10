@@ -11,6 +11,8 @@ import { panelLock, SESSION_COOKIE, verifySessionToken } from "@/lib/auth/sessio
  * Falla cerrado: en producción, sin `PANEL_PASSWORD`, nadie entra. En local
  * (`next dev`) sin contraseña se deja pasar para no estorbar.
  */
+const LEZGO_IA_WEBHOOK = "/api/lezgo-ia/entrada"
+
 export function proxy(request: NextRequest) {
   const lock = panelLock()
   const { pathname, search } = request.nextUrl
@@ -22,6 +24,9 @@ export function proxy(request: NextRequest) {
   if (lock.mode === "closed") {
     return new NextResponse("Falta PANEL_PASSWORD: el panel está cerrado.", { status: 503 })
   }
+
+  // El webhook de Lezgo IA no trae sesión: lo cierra su propio secreto.
+  if (pathname === LEZGO_IA_WEBHOOK && request.method === "POST") return NextResponse.next()
 
   const token = request.cookies.get(SESSION_COOKIE)?.value
   const signedIn = verifySessionToken(token, lock.user, lock.password)

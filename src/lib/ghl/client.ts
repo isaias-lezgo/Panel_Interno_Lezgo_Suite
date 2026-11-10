@@ -146,6 +146,8 @@ export type GhlMessage = {
   id: string
   direction: "inbound" | "outbound"
   messageType?: string
+  /** Texto del mensaje. Lo que salió por GoGHL conserva su `{WA#N}` inicial. */
+  body?: string
   dateAdded: string
   source?: string
   userId?: string
@@ -298,6 +300,10 @@ export class GhlClient {
     locationId?: string
     pipelineId?: string
     status?: GhlOpportunity["status"]
+    /** Id del usuario de GHL que la tiene asignada. */
+    assignedTo?: string
+    /** Texto libre: nombre de la oportunidad o del contacto. */
+    query?: string
     limit?: number
     startAfter?: number
     startAfterId?: string
@@ -317,11 +323,19 @@ export class GhlClient {
         location_id: this.locationOrThrow(params.locationId),
         pipeline_id: params.pipelineId,
         status: params.status,
+        assigned_to: params.assignedTo,
+        q: params.query,
         limit: params.limit ?? 25,
         startAfter: params.startAfter,
         startAfterId: params.startAfterId,
       },
     })
+  }
+
+  getOpportunity(opportunityId: string) {
+    return this.request<{ opportunity: GhlOpportunity & { locationId?: string } }>(
+      `/opportunities/${opportunityId}`,
+    )
   }
 
   createOpportunity(input: {

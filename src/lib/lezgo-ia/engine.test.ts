@@ -7,6 +7,7 @@ import {
   composeMessage,
   detectAlerts,
   planDeliveries,
+  splitMessage,
   type EngineOpportunity,
 } from "./engine"
 
@@ -58,6 +59,7 @@ const opp = (patch: Partial<EngineOpportunity> = {}): EngineOpportunity => ({
   id: "o1",
   name: "Oportunidad",
   contactName: "Juan Ruiz",
+  contactId: null,
   pipelineId: "p1",
   stageId: "s1",
   assignedTo: "ana",
@@ -111,6 +113,17 @@ describe("detectAlerts", () => {
     expect(alerts).toMatchObject([{ kind: "abandonedLead" }])
   })
 
+  it("dos oportunidades del mismo contacto dan un solo aviso de su conversación", () => {
+    const conversation = { lastMessageAt: ago(8 * DAY), lastDirection: "outbound" as const }
+    const alerts = detect([
+      opp({ id: "o1", contactId: "c1", conversation }),
+      opp({ id: "o2", contactId: "c1", conversation }),
+      opp({ id: "o3", contactId: "c2", conversation }),
+    ])
+    expect(alerts.map((a) => a.opportunityId)).toEqual(["o1", "o3"])
+    expect(alerts[0].line).toBe("Juan Ruiz: 8 días sin contestar")
+  })
+
   it("si el último mensaje es del lead, no es abandono", () => {
     expect(
       detect([opp({ conversation: { lastMessageAt: ago(5 * DAY), lastDirection: "inbound" } })]),
@@ -131,6 +144,28 @@ describe("detectAlerts", () => {
       detect([], account({ settings: { dailySummary: { enabled: true, option } } }))
     expect(at("09:00")).toMatchObject([{ kind: "dailySummary", key: "summary:2026-09-23" }])
     expect(at("18:00")).toEqual([])
+  })
+
+  it("el resumen cuida el singular, declara lo que no leyó y lo que nadie recibe", () => {
+    const acc = account({ settings: { dailySummary: { enabled: true, option: "09:00" } } })
+    acc.advisors.ana.alerts = false
+    const alerts = detectAlerts({
+      now,
+      account: acc,
+      pipelines,
+      advisors,
+      opportunities: [opp({ createdAt: ago(45 * MIN), firstContactAt: null })],
+      totalOpen: 1234,
+    })
+    expect(alerts.at(-1)?.line).toBe(
+      [
+        "1234 oportunidades abiertas; revisé 1, 1 nueva en las últimas 24 h",
+        "1 lead nuevo sin primer contacto",
+        "0 leads sin contestar",
+        "0 oportunidades sin movimiento en su etapa",
+        "1 aviso no sale: es de asesores con los avisos apagados",
+      ].join("\n"),
+    )
   })
 })
 
@@ -176,6 +211,30 @@ describe("planDeliveries", () => {
     expect(p.deliveries[0].recipient).toMatchObject({ id: "luis", role: "admin" })
   })
 
+  it("avisa de un tope de oportunidades, lo más urgente primero, y cuenta el resto", () => {
+    const silent = { lastMessageAt: ago(3 * DAY), lastDirection: "outbound" as const }
+    const p = planDeliveries({
+      alerts: detect([
+        opp({ id: "o1", contactId: "c1", conversation: silent }),
+        opp({ id: "o2", contactId: "c2", conversation: silent }),
+        opp({ id: "o3", contactId: "c3", createdAt: ago(45 * MIN), firstContactAt: null }),
+      ]),
+      account: account(),
+      advisors,
+      at: now,
+      sentKeys: new Set(),
+      maxOpportunities: 2,
+    })
+    expect(p.held).toBe(1)
+    expect(p.deliveries[0].more).toBe(1)
+    // El lead nuevo entra aunque venga al final; se queda fuera un "sin contestar".
+    expect(p.deliveries[0].alerts.map((a) => a.opportunityId)).toEqual(["o3", "o1"])
+    const text = composeMessage({ delivery: p.deliveries[0], voice: null, test: false })
+    expect(text.endsWith(
+      "Hay 1 oportunidad más que necesita atención. Arregla estas 2 primero y luego te ayudo con el resto.",
+    )).toBe(true)
+  })
+
   it("el gerente son los admins; sin admins no hay a quién", () => {
     const alerts = detect([opp({ assignedTo: null, createdAt: ago(45 * MIN), firstContactAt: null })])
     const p = plan(alerts)
@@ -212,5 +271,32 @@ describe("composeMessage", () => {
         "*Lead nuevo sin primer contacto* (1)\n• Juan Ruiz: entró hace 45 min",
       ].join("\n\n"),
     )
+  })
+})
+
+describe("splitMessage", () => {
+  const line = (n: number) => `• Lead ${n}: 14 días sin contestar. ¿Lo pasamos a perdido?`
+  const block = (title: string, count: number) =>
+    [`*${title}*`, ...Array.from({ length: count }, (_, i) => line(i))].join("\n")
+
+  it("deja entero lo que cabe", () => {
+    expect(splitMessage("Hola Ana.\n\n*Resumen*")).toEqual(["Hola Ana.\n\n*Resumen*"])
+  })
+
+  it("corta entre bloques sin perder ni repetir nada", () => {
+    const text = ["Hola.", block("Uno", 5), block("Dos", 5), block("Tres", 5)].join("\n\n")
+    const parts = splitMessage(text, 400)
+    expect(parts.length).toBeGreaterThan(1)
+    for (const part of parts) expect(part.length).toBeLessThanOrEqual(400)
+    expect(parts.join("\n\n")).toBe(text)
+  })
+
+  it("parte por renglones un bloque que solo no cabe", () => {
+    const text = block("Propuestos para perdido", 20)
+    const parts = splitMessage(text, 300)
+    for (const part of parts) expect(part.length).toBeLessThanOrEqual(300)
+    expect(parts.join("\n")).toBe(text)
+    // Ningún renglón queda a medias.
+    for (const part of parts) expect(part.endsWith("?") || part.endsWith("*")).toBe(true)
   })
 })

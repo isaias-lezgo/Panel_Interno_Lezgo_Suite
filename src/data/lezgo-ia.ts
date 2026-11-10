@@ -731,6 +731,14 @@ export type Thread = {
   about?: string
   unread: boolean
   messages: ThreadMessage[]
+  /**
+   * Nombre del destinatario tal como se guardó al mandar. Sirve cuando
+   * `advisorId` no es un asesor de la subcuenta: "manager", o alguien que ya
+   * no está en GHL.
+   */
+  recipientName?: string
+  /** Solo en hilos que vienen del motor: qué pasó con el WhatsApp. */
+  delivery?: { status: "sent" | "failed" | "simulated"; error?: string }
 }
 
 export const threads: Thread[] = [
