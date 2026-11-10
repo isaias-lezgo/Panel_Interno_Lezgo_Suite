@@ -3,7 +3,7 @@
  * `lezgo-ia.ts`.
  */
 
-export type ActionKind = "stage" | "appointment" | "task" | "note" | "tag"
+export type ActionKind = "stage" | "appointment" | "task" | "note" | "tag" | "lost"
 
 export type GhlAction = {
   id: string
@@ -30,6 +30,7 @@ export const actionKindLabel: Record<
   task: { label: "Creó tarea", tone: "live" },
   note: { label: "Agregó nota", tone: "idle" },
   tag: { label: "Etiquetó", tone: "idle" },
+  lost: { label: "Marcó perdido", tone: "risk" },
 }
 
 const ghl = (locationId: string, contactId: string) =>

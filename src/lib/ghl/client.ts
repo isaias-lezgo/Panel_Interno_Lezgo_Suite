@@ -338,6 +338,25 @@ export class GhlClient {
     )
   }
 
+  /** Cambia solo el estado: abierta, ganada, perdida o abandonada. */
+  setOpportunityStatus(opportunityId: string, status: GhlOpportunity["status"]) {
+    return this.request<{ succeded?: boolean }>(`/opportunities/${opportunityId}/status`, {
+      method: "PUT",
+      body: { status },
+    })
+  }
+
+  /** Tarea en un contacto. `dueDate` es un instante ISO. */
+  createTask(
+    contactId: string,
+    input: { title: string; body?: string; dueDate: string; assignedTo?: string },
+  ) {
+    return this.request<{ task: { id: string } }>(`/contacts/${contactId}/tasks`, {
+      method: "POST",
+      body: { ...input, completed: false },
+    })
+  }
+
   createOpportunity(input: {
     locationId?: string
     pipelineId: string

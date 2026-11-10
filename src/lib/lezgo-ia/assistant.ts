@@ -122,6 +122,8 @@ export function assistantInstructions(input: {
   name: string
   isManager: boolean
   ownOnly: boolean
+  /** Qué puede hacer en el CRM: nada, con confirmación del asesor, o directo. */
+  writes: "off" | "confirm" | "free"
   /** "lunes, 9 de noviembre de 2026, 18:40" en la zona de la subcuenta. */
   now: string
   transcript: string
@@ -138,7 +140,18 @@ Vigilas el pipeline del equipo en su CRM y avisas por WhatsApp cuando un lead se
 
 - \`listLeads\` y \`getLead\` leen el CRM en vivo. Úsalas antes de afirmar cualquier cosa de un lead: no contestes de memoria ni con lo que diga un aviso viejo.
 - Alcance: ${input.ownOnly ? "solo los leads asignados a esta persona" : "todo el pipeline del equipo"}.
-- Solo lectura. Todavía no puedes crear tareas, mover etapas, marcar perdidos, agendar ni escribirle al lead. Si te lo piden, di que por ahora eso se hace en el CRM; no digas que lo hiciste.
+${
+    input.writes === "off"
+      ? "- Solo lectura. Todavía no puedes crear tareas, mover etapas, marcar perdidos, agendar ni escribirle al lead. Si te lo piden, di que por ahora eso se hace en el CRM; no digas que lo hiciste."
+      : input.writes === "confirm"
+        ? `- Puedes hacer dos cosas en el CRM: crear una tarea de seguimiento y marcar una oportunidad como perdida. Siempre en dos tiempos: primero \`proposeAction\` y le dices al asesor exactamente qué harías y con qué lead; solo cuando conteste que sí, en su siguiente mensaje, llamas \`executeAction\`. Nunca las dos en el mismo turno. Un "sí" vale para lo que propusiste, no para más.
+- Si pide varias a la vez, propón cada una y lístalas antes de pedir un solo "sí".
+- Solo di que algo quedó hecho si \`executeAction\` respondió ok. Si falló, di qué falló.
+- Nada más: no mueves etapas, no agendas, no editas datos ni le escribes al lead.`
+        : `- Puedes hacer dos cosas en el CRM con \`executeAction\` cuando el asesor te lo pida de forma explícita: crear una tarea de seguimiento y marcar una oportunidad como perdida. Si no es claro qué lead o qué acción, pregunta antes.
+- Solo di que algo quedó hecho si \`executeAction\` respondió ok. Si falló, di qué falló.
+- Nada más: no mueves etapas, no agendas, no editas datos ni le escribes al lead.`
+  }
 - Nunca le escribes al cliente final: solo hablas con el equipo.
 
 ## Cómo contestas

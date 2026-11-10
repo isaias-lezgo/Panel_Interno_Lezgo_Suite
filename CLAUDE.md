@@ -295,7 +295,8 @@ se agrega a mano en la ficha, y quitar un enlace lo archiva (`excluded`). Un
 El panel escribe poco y **a Neon (y a Blob)**. Son cuatro cosas: los
 enlaces (suscripción de Stripe y subcuenta), las cuatro columnas de cuenta que se
 editan en la tabla, las implementaciones con su checklist y sus notas, y los
-pendientes. La única escritura a GHL son los WhatsApp del motor de Lezgo IA.
+pendientes. Las escrituras a GHL son los WhatsApp de Lezgo IA y, solo con
+`LEZGO_IA_WRITE_ACTIONS=1`, las tareas y los perdidos que pide un asesor.
 
 **Cuenta del cliente.** La tabla lleva cuatro columnas que se editan en la
 propia celda —membresía, servicio técnico, periodicidad y vencimiento de
@@ -377,6 +378,37 @@ pregunta usa el id del mensaje como llave primaria, así un webhook repetido
 no contesta dos veces. Con `?simular=1` la ruta devuelve la respuesta sin
 mandarla ni anotarla.
 
+**Acciones del asistente** (`src/lib/lezgo-ia/actions.ts`). Con
+`LEZGO_IA_WRITE_ACTIONS` el asistente puede **escribir en el CRM** —`interna`
+solo en la subcuenta propia de Lezgo Suite, que es como está en producción
+mientras se prueba; `1` también en las de los clientes—: crear una tarea de seguimiento y marcar una oportunidad como
+perdida. Sin la variable es solo lectura, diga lo que diga la configuración.
+Con ella manda "Escribir en el CRM" de la subcuenta: "Nunca", "Con
+confirmación" o "Sin confirmación". Con confirmación va en dos tiempos y lo
+hace cumplir el código, no el modelo: `proposeAction` anota la propuesta y
+`executeAction` solo corre si esa propuesta es de un turno **anterior**, o
+sea que entre proponer y hacer hubo un mensaje del asesor. Propuestas
+(`proposal`) y acciones hechas (`action`) viven en `lezgo_ia_notifications`
+con el detalle en JSON; las acciones son la pestaña Bitácora. Los endpoints
+(`PUT /opportunities/:id/status`, `POST /contacts/:id/tasks`) **no se han
+verificado contra la API real**.
+
+**Cron de Lezgo IA — en pausa.** La ruta `/api/lezgo-ia/cron` existe pero
+nadie la llama: no hay `vercel.json`. Para prenderlo, un `vercel.json` con
+`"crons": [{ "path": "/api/lezgo-ia/cron", "schedule": "0 15 * * *" }]`
+(15:00 UTC, 9:00 de México; en Hobby cae en algún momento de esa hora) y
+`CRON_SECRET` en Vercel. Corre el motor en cada subcuenta activa, una tras otra, con un presupuesto
+de tiempo: las que no alcanzan quedan para la siguiente
+(`src/lib/lezgo-ia/run-all.ts`). Entra con `CRON_SECRET`, que Vercel manda
+solo. Una vez al día no alcanza para los avisos de minutos: eso pide plan
+Pro o un disparador externo a la misma ruta.
+
+**Lezgo IA en la subcuenta propia.** La subcuenta Lezgo Suite aparece en
+Lezgo IA como "Equipo Lezgo (interna)" aunque no sea de ningún cliente, y
+ahí los usuarios del equipo sí cuentan como asesores. Es el lugar para
+probar el motor y las acciones del asistente sobre nuestro propio CRM, sin
+tocar el de un cliente.
+
 **Modelo.** `src/lib/ai/model.ts` resuelve el modelo por dos caminos: con
 `ANTHROPIC_API_KEY` habla directo con Anthropic; sin ella usa el AI Gateway con
 el identificador `proveedor/modelo`. Los créditos **gratis** del Gateway no
@@ -429,7 +461,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 21 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
+pnpm test         # vitest, 23 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero
@@ -458,6 +490,8 @@ devuelven un error explicado en la interfaz.
 | `BLOB_READ_WRITE_TOKEN` | Blob privado de las imágenes de las notas. Lo pone Vercel al conectar el store |
 | `LEZGO_IA_TEST_CONTACT_ID` | Contacto de Lezgo Suite al que llegan todos los avisos del motor en pruebas. Vacía = simulado |
 | `LEZGO_IA_WEBHOOK_SECRET` | Secreto alterno del webhook de mensajes entrantes (`x-lezgo-ia-secret` o `?secreto=`) y el único que abre `?simular=1`. Vacía = solo entra la firma de GHL |
+| `LEZGO_IA_WRITE_ACTIONS` | Deja al asistente crear tareas y marcar perdidos: `interna` solo en la subcuenta Lezgo Suite, `1` en todas. Vacía = solo lectura |
+| `CRON_SECRET` | Lo manda Vercel al cron diario del motor. Vacía = el cron no corre nada |
 | `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados
@@ -474,7 +508,8 @@ devuelven un error explicado en la interfaz.
   contraseña: cambiarla cierra todas las sesiones. Sin sesión, las páginas
   redirigen a `/entrar?next=` y las APIs responden 401. La única excepción es
   el `POST` a `/api/lezgo-ia/entrada`, el webhook de GHL, que exige la firma
-  de GHL o `LEZGO_IA_WEBHOOK_SECRET`. En producción, sin `PANEL_PASSWORD` no
+  de GHL o `LEZGO_IA_WEBHOOK_SECRET`, y el `GET` a `/api/lezgo-ia/cron`, que
+  exige `CRON_SECRET`. En producción, sin `PANEL_PASSWORD` no
   entra nadie. La protección de Vercel del proyecto es la estándar, que **no**
   cubre el dominio de producción: el candado es lo único que lo cierra. No lo
   quites ni lo relajes sin reemplazo.

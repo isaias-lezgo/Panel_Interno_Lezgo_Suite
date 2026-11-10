@@ -6,9 +6,15 @@ import { eq } from "drizzle-orm"
 import { model } from "@/lib/ai/model"
 import { db, schema } from "@/db"
 import { ghlFor } from "@/lib/ghl/for-location"
-import { lezgoSuite, lezgoSuiteEnabled, sendWhatsApp } from "@/lib/ghl/lezgo-suite"
+import {
+  LEZGO_SUITE_LOCATION_ID,
+  lezgoSuite,
+  lezgoSuiteEnabled,
+  sendWhatsApp,
+} from "@/lib/ghl/lezgo-suite"
 import { getLastNotificationTo, getLezgoIaConfig, getLezgoIaData } from "@/lib/repository"
 
+import { writeMode } from "./actions"
 import { assistantInstructions, leadScope, pendingQuestion, transcript } from "./assistant"
 import { assistantTools } from "./assistant-tools"
 import { resolveAdvisor } from "./config"
@@ -122,6 +128,12 @@ export async function answerInbound(
     crmScope: settings.crmScope?.option,
   })
   const now = new Date()
+  // Escribir en el CRM del cliente pide el interruptor y el ajuste de la subcuenta.
+  const writes = writeMode({
+    flag: process.env.LEZGO_IA_WRITE_ACTIONS,
+    internal: locationId === LEZGO_SUITE_LOCATION_ID,
+    crmWrite: settings.crmWrite?.option,
+  })
 
   let answer: string
   try {
@@ -133,6 +145,7 @@ export async function answerInbound(
         name: last.recipientName,
         isManager: last.recipient === "manager",
         ownOnly: scope.assignedTo !== null,
+        writes,
         now: now.toLocaleString("es-MX", {
           timeZone: config.timezone,
           weekday: "long",
@@ -157,6 +170,17 @@ export async function answerInbound(
         pipelineName: new Map(account.pipelines.map((p) => [p.id, p.name])),
         advisorName: new Map(account.advisors.map((a) => [a.id, a.name])),
         now,
+        writes:
+          writes === "off"
+            ? null
+            : {
+                mode: writes,
+                runId,
+                recipient: last.recipient,
+                recipientName: last.recipientName,
+                testContactId,
+                simulate,
+              },
       }),
       stopWhen: stepCountIs(MAX_STEPS),
     })

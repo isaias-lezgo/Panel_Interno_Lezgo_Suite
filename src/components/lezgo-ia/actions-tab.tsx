@@ -107,7 +107,7 @@ export function ActionsTab({ data }: { data: LezgoIaData }) {
           rows.length === 0 ? (
             <EmptyState title="Sin acciones todavía">
               {data.source === "ghl"
-                ? "El motor por ahora solo avisa por WhatsApp: no mueve etapas ni crea tareas en GoHighLevel. Lo que mandó está en Mensajes."
+                ? "Aquí queda cada tarea creada y cada oportunidad marcada como perdida a petición de un asesor. Todavía no hay ninguna. Lo que la IA mandó está en Mensajes."
                 : "La IA no ha hecho nada en GoHighLevel."}
             </EmptyState>
           ) : (
@@ -148,7 +148,7 @@ export function ActionsTab({ data }: { data: LezgoIaData }) {
                           {a.text}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted-foreground">
-                          Para {advisor?.name} · {accountById.get(a.subaccountId)?.name} ·{" "}
+                          Para {advisor?.name ?? (a.advisorId === "manager" ? "Gerente" : "un asesor")} · {accountById.get(a.subaccountId)?.name} ·{" "}
                           {relativeTime(a.at, now)}
                         </span>
                       </span>

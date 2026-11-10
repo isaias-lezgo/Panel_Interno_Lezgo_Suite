@@ -28,6 +28,7 @@ import {
   type StoredStageRules,
 } from "@/lib/lezgo-ia/config"
 import { advisorUsers, toSubaccount } from "@/lib/lezgo-ia/from-ghl"
+import { actionsFromRows } from "@/lib/lezgo-ia/actions"
 import { threadsFromNotifications, weeklySentBySubaccount } from "@/lib/lezgo-ia/log"
 import type { IaStatus, SettingValues, Voice } from "@/data/lezgo-ia"
 import {
@@ -1102,6 +1103,8 @@ const cachedLezgoIaSubaccount = unstable_cache(
 )
 
 async function readLezgoIaSubaccount({ location, clientName }: LezgoIaLink) {
+  // En la subcuenta propia el equipo Lezgo no es "staff de paso": son sus asesores.
+  const isStaff = location.id === LEZGO_SUITE_LOCATION_ID ? () => false : isLezgoStaff
   try {
     const { users } = await ghl.searchUsers({
       companyId: location.companyId,
@@ -1109,13 +1112,13 @@ async function readLezgoIaSubaccount({ location, clientName }: LezgoIaLink) {
     })
     const live = await readLocationPipeline(
       location.id,
-      advisorUsers(users, isLezgoStaff).map((u) => u.id),
+      advisorUsers(users, isStaff).map((u) => u.id),
     )
     const subaccount = toSubaccount({
       location,
       users,
       clientName,
-      isStaff: isLezgoStaff,
+      isStaff,
       ...live,
     })
     return { kind: "live" as const, subaccount }
@@ -1186,13 +1189,19 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
   }
   if (!ghl.isConfigured || !db) return demoData
 
-  const [links, clients] = await Promise.all([
+  const [linked, clients] = await Promise.all([
     listLocationLinks(),
     db
       .select({ id: schema.clients.id, name: schema.clients.name })
       .from(schema.clients),
   ])
   const clientById = new Map(clients.map((c) => [c.id, c.name]))
+  // La subcuenta propia entra aunque no sea de ningún cliente: es donde el
+  // equipo prueba Lezgo IA sobre su propio CRM.
+  const links =
+    lezgoSuiteEnabled() && !linked.some((l) => l.ghlLocationId === LEZGO_SUITE_LOCATION_ID)
+      ? [...linked, { ghlLocationId: LEZGO_SUITE_LOCATION_ID, clientId: "" }]
+      : linked
 
   try {
     const locations = await cachedLezgoIaLocations()
@@ -1204,7 +1213,9 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
         try {
           return await cachedLezgoIaSubaccount({
             location,
-            clientName: clientById.get(link.clientId) ?? "",
+            clientName:
+              clientById.get(link.clientId) ??
+              (link.ghlLocationId === LEZGO_SUITE_LOCATION_ID ? "Equipo Lezgo (interna)" : ""),
           })
         } catch (error) {
           console.error(`GHL no devolvió ${link.ghlLocationId}`, error)
@@ -1224,7 +1235,8 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
       subaccounts.map((s) => ({ locationId: s.id, timezone: s.timezone })),
     )
     const now = new Date()
-    const threads = await getLezgoIaThreads(subaccounts.map((s) => s.id))
+    const ids = subaccounts.map((s) => s.id)
+    const [threads, actions] = await Promise.all([getLezgoIaThreads(ids), getLezgoIaActions(ids)])
     const weekly = weeklySentBySubaccount(threads, now)
     return {
       source: "ghl",
@@ -1234,8 +1246,7 @@ export async function getLezgoIaData(): Promise<lezgoIaDemo.LezgoIaData> {
         weeklyMessages: weekly.get(s.id) ?? 0,
       })),
       threads,
-      // El motor todavía solo avisa: no hace nada en GHL que anotar aquí.
-      actions: [],
+      actions,
       failed,
       inactive,
     }
@@ -1334,6 +1345,49 @@ export async function getLezgoIaThreads(locationIds: string[]) {
     return threadsFromNotifications(rows)
   } catch (error) {
     console.error("No se leyó la bitácora de Lezgo IA", error)
+    return []
+  }
+}
+
+/**
+ * ¿Lezgo IA puede configurarse y correr en esta subcuenta? Las enlazadas a
+ * un cliente y la propia de Lezgo Suite. Lo usan las acciones del servidor:
+ * el navegador no elige a cuál escribir.
+ */
+export async function isLezgoIaLocation(locationId: string) {
+  if (lezgoSuiteEnabled() && locationId === LEZGO_SUITE_LOCATION_ID) return true
+  const links = await listLocationLinks()
+  return links.some((l) => l.ghlLocationId === locationId)
+}
+
+/**
+ * Lo que el asistente de Lezgo IA hizo en GoHighLevel a petición de un
+ * asesor (renglones `action`), lo más reciente primero: la pestaña Bitácora.
+ */
+export async function getLezgoIaActions(locationIds: string[]) {
+  if (!db || locationIds.length === 0) return []
+  try {
+    const rows = await db
+      .select({
+        id: schema.lezgoIaNotifications.id,
+        ghlLocationId: schema.lezgoIaNotifications.ghlLocationId,
+        recipient: schema.lezgoIaNotifications.recipient,
+        recipientName: schema.lezgoIaNotifications.recipientName,
+        body: schema.lezgoIaNotifications.body,
+        createdAt: schema.lezgoIaNotifications.createdAt,
+      })
+      .from(schema.lezgoIaNotifications)
+      .where(
+        and(
+          inArray(schema.lezgoIaNotifications.ghlLocationId, locationIds),
+          eq(schema.lezgoIaNotifications.kind, "action"),
+        ),
+      )
+      .orderBy(desc(schema.lezgoIaNotifications.createdAt))
+      .limit(500)
+    return actionsFromRows(rows)
+  } catch (error) {
+    console.error("No se leyó la bitácora de acciones de Lezgo IA", error)
     return []
   }
 }

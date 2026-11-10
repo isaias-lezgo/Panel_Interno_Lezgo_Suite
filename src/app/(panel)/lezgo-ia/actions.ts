@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm"
 import { db, schema } from "@/db"
 import { saveAccountInput, type SaveAccountInput } from "@/lib/lezgo-ia/config"
 import { runLezgoIa, type RunResult } from "@/lib/lezgo-ia/run"
-import { listLocationLinks } from "@/lib/repository"
+import { isLezgoIaLocation } from "@/lib/repository"
 
 type Done = { ok: true } | { ok: false; error: string }
 
@@ -28,9 +28,8 @@ export async function saveLezgoIaAccount(raw: SaveAccountInput): Promise<Done> {
   }
   const input = parsed.data
 
-  // Solo subcuentas enlazadas a un cliente: el navegador no elige a cuál escribir.
-  const links = await listLocationLinks()
-  if (!links.some((l) => l.ghlLocationId === input.locationId)) {
+  // Solo subcuentas enlazadas a un cliente (o la propia): el navegador no elige a cuál escribir.
+  if (!(await isLezgoIaLocation(input.locationId))) {
     return { ok: false, error: "Esa subcuenta no está enlazada a ningún cliente." }
   }
 
@@ -99,8 +98,7 @@ export async function runLezgoIaNow(
   locationId: string,
   options: { repeat?: boolean } = {},
 ): Promise<RunResult> {
-  const links = await listLocationLinks()
-  if (!links.some((l) => l.ghlLocationId === locationId)) {
+  if (!(await isLezgoIaLocation(locationId))) {
     return { ok: false, error: "Esa subcuenta no está enlazada a ningún cliente." }
   }
   try {
