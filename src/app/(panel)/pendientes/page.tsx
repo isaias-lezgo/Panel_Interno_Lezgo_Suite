@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 
 import { PageHeader } from "@/components/panel/page-header"
 import { PendingList } from "@/components/pendings/pending-list"
+import { COLLAPSED_COOKIE, parseCollapsed } from "@/lib/pendings/collapsed"
 import {
   DEFAULT_OWNER,
   isPendingOwner,
@@ -38,6 +39,7 @@ export default async function PendientesPage() {
           pendings={pendings}
           groupOrder={groupOrder}
           initialOwner={owner}
+          initialCollapsed={parseCollapsed(store.get(COLLAPSED_COOKIE)?.value)}
           locations={locations.options}
           locationsError={locations.error}
         />

@@ -198,6 +198,7 @@ export const implementationContacts = pgTable(
  * `implementations`, para que la lista se lea aunque GHL no conteste.
  * Marcar hecho no borra: `done_at` ordena los tachados al pie del grupo.
  * `owner` es la pestaña en la que vive (`src/lib/pendings/owners.ts`).
+ * `not_urgent` lo manda al pie de los abiertos de su grupo: puede esperar.
  */
 export const pendings = pgTable("pendings", {
   id: text("id").primaryKey(),
@@ -206,6 +207,7 @@ export const pendings = pgTable("pendings", {
   ghlLocationId: text("ghl_location_id"),
   ghlLocationName: text("ghl_location_name"),
   done: boolean("done").notNull().default(false),
+  notUrgent: boolean("not_urgent").notNull().default(false),
   doneAt: timestamp("done_at", { withTimezone: true, mode: "string" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .notNull()

@@ -12,6 +12,9 @@ const closedAt = (p: Pending) => p.doneAt ?? p.createdAt
  * no contesta o la subcuenta ya no está; si tampoco hay, queda el id, que al
  * menos se puede buscar.
  *
+ * Dentro de un grupo, lo abierto va del más viejo al más nuevo y lo marcado
+ * "no urgente" baja al pie de lo abierto, antes de lo hecho.
+ *
  * `order` son los ids de subcuenta en el orden en que la persona los dejó al
  * arrastrarlos. Los que no aparecen ahí van después, por nombre, y "Sin
  * subcuenta" siempre al final.
@@ -43,7 +46,11 @@ export function groupPendings(
   }
 
   for (const group of groups.values()) {
-    group.open.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    group.open.sort(
+      (a, b) =>
+        Number(a.notUrgent) - Number(b.notUrgent) ||
+        a.createdAt.localeCompare(b.createdAt),
+    )
     group.done.sort((a, b) => closedAt(b).localeCompare(closedAt(a)))
   }
 

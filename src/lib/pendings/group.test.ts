@@ -9,6 +9,7 @@ const pending = (p: Partial<Pending> & { id: string }): Pending => ({
   ghlLocationId: null,
   ghlLocationName: null,
   done: false,
+  notUrgent: false,
   doneAt: null,
   createdAt: "2026-09-22T10:00:00.000Z",
   ...p,
@@ -136,5 +137,25 @@ describe("moveGroup", () => {
 
   it("deja el orden igual si el destino no existe", () => {
     expect(moveGroup(groups, "loc_a", "nada")).toEqual(["loc_a", "loc_b", "loc_c"])
+  })
+})
+
+describe("no urgentes", () => {
+  it("bajan al pie de los abiertos, del más viejo al más nuevo", () => {
+    const [group] = groupPendings(
+      [
+        pending({ id: "espera-vieja", notUrgent: true, createdAt: "2026-09-01T10:00:00.000Z" }),
+        pending({ id: "nuevo", createdAt: "2026-09-22T10:00:00.000Z" }),
+        pending({ id: "espera-nueva", notUrgent: true, createdAt: "2026-09-10T10:00:00.000Z" }),
+        pending({ id: "viejo", createdAt: "2026-09-05T10:00:00.000Z" }),
+      ],
+      names,
+    )
+    expect(group.open.map((p) => p.id)).toEqual([
+      "viejo",
+      "nuevo",
+      "espera-vieja",
+      "espera-nueva",
+    ])
   })
 })

@@ -268,6 +268,7 @@ const pending = (
   createdAt: string,
   doneAt: string | null = null,
   owner: PendingOwner = "isaias",
+  notUrgent = false,
 ): Pending => ({
   id,
   body,
@@ -275,6 +276,7 @@ const pending = (
   ghlLocationId: location?.[0] ?? null,
   ghlLocationName: location?.[1] ?? null,
   done: doneAt !== null,
+  notUrgent,
   doneAt,
   createdAt,
 })
@@ -286,7 +288,7 @@ const cascade: [string, string] = ["loc_Cs4Rf7Wn", "Cascade Roofing Co."]
 export const pendings: Pending[] = [
   pending("pd_001", "Mandar el snapshot de citas a revisión", northgate, "2026-09-18T15:20:00.000Z"),
   pending("pd_002", "Revisar por qué el número de WhatsApp no manda", northgate, "2026-09-21T11:05:00.000Z", null, "juan-carlos"),
-  pending("pd_003", "Capacitar a recepción en el calendario", northgate, "2026-09-22T09:40:00.000Z"),
+  pending("pd_003", "Capacitar a recepción en el calendario", northgate, "2026-09-22T09:40:00.000Z", null, "isaias", true),
   pending("pd_004", "Pedir el logo en vectores", northgate, "2026-09-17T18:00:00.000Z", "2026-09-21T16:30:00.000Z"),
   pending("pd_005", "Conectar Stripe a la subcuenta", veloz, "2026-09-19T10:15:00.000Z", null, "juan-carlos"),
   pending("pd_006", "Cerrar el formulario viejo de la landing", veloz, "2026-09-20T13:45:00.000Z", "2026-09-22T08:10:00.000Z"),

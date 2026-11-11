@@ -26,21 +26,36 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { GripVerticalIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
+  ClockIcon,
+  GripVerticalIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import {
   createPending,
   deletePending,
   reorderPendingGroups,
+  setPendingNotUrgent,
   togglePending,
 } from "@/app/(panel)/pendientes/actions"
 import { LinkPicker } from "@/components/clients/link-picker"
 import { EmptyState, Instrument } from "@/components/panel/page-header"
+import { StatusChip } from "@/components/signal/status-chip"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  COLLAPSED_COOKIE,
+  collapseKey,
+  serializeCollapsed,
+} from "@/lib/pendings/collapsed"
 import { groupPendings, moveGroup, SIN_SUBCUENTA } from "@/lib/pendings/group"
 import {
   isPendingOwner,
@@ -57,6 +72,7 @@ type Done = { ok: true } | { ok: false; error: string }
 type Edit =
   | { type: "add"; pending: Pending }
   | { type: "toggle"; id: string; done: boolean }
+  | { type: "urgency"; id: string; notUrgent: boolean }
   | { type: "delete"; id: string }
 
 /** Un pendiente recién escrito, mientras el servidor confirma. */
@@ -72,6 +88,7 @@ const draft = (
   ghlLocationId: locationId,
   ghlLocationName: name,
   done: false,
+  notUrgent: false,
   doneAt: null,
   createdAt: new Date().toISOString(),
 })
@@ -79,6 +96,11 @@ const draft = (
 function apply(current: Pending[], edit: Edit): Pending[] {
   if (edit.type === "add") return [...current, edit.pending]
   if (edit.type === "delete") return current.filter((p) => p.id !== edit.id)
+  if (edit.type === "urgency") {
+    return current.map((p) =>
+      p.id === edit.id ? { ...p, notUrgent: edit.notUrgent } : p,
+    )
+  }
   return current.map((p) =>
     p.id === edit.id
       ? {
@@ -105,6 +127,11 @@ const rememberOwner = (owner: PendingOwner) => {
   document.cookie = `${OWNER_COOKIE}=${owner}; path=/; max-age=31536000; samesite=lax`
 }
 
+/** Igual que la pestaña: un año, y el servidor la lee para no parpadear. */
+const rememberCollapsed = (keys: Iterable<string>) => {
+  document.cookie = `${COLLAPSED_COOKIE}=${serializeCollapsed(keys)}; path=/; max-age=31536000; samesite=lax`
+}
+
 const cuenta = (n: number, uno: string, varios: string) =>
   `${n} ${n === 1 ? uno : varios}`
 
@@ -114,17 +141,22 @@ const cuenta = (n: number, uno: string, varios: string) =>
  * acto, sin esperar el viaje de ida y vuelta. Cada persona tiene su pestaña,
  * y lo que se escribe entra en la pestaña abierta. Los grupos se arrastran
  * desde el asa de su encabezado y cada persona guarda su propio orden.
+ * Cada grupo se colapsa desde su nombre; qué está colapsado es cosa de este
+ * navegador y no se guarda en Neon.
  */
 export function PendingList({
   pendings,
   groupOrder,
   initialOwner,
+  initialCollapsed,
   locations,
   locationsError,
 }: {
   pendings: Pending[]
   groupOrder: Order
   initialOwner: PendingOwner
+  /** Llaves de `collapseKey` que este navegador dejó cerradas. */
+  initialCollapsed: string[]
   locations: LocationOption[]
   locationsError: string | null
 }) {
@@ -132,6 +164,7 @@ export function PendingList({
   const [error, setError] = useState<string | null>(null)
   const [showDone, setShowDone] = useState(false)
   const [owner, setOwner] = useState(initialOwner)
+  const [collapsed, setCollapsed] = useState(() => new Set(initialCollapsed))
   const [all, edit] = useOptimistic(pendings, apply)
   const [order, setOrder] = useOptimistic(groupOrder, reorder)
   const list = all.filter((p) => p.owner === owner)
@@ -144,6 +177,23 @@ export function PendingList({
   const shown = showDone ? groups : groups.filter((g) => g.open.length > 0)
   const open = list.filter((p) => !p.done).length
   const done = list.length - open
+  const waiting = list.filter((p) => !p.done && p.notUrgent).length
+  const shownKeys = shown.map((g) => collapseKey(owner, g.locationId))
+  const allCollapsed =
+    shownKeys.length > 0 && shownKeys.every((k) => collapsed.has(k))
+
+  /**
+   * Cambia qué está colapsado y lo recuerda. De paso suelta las llaves de
+   * grupos que ya no existen, para que la cookie no crezca sin fin.
+   */
+  const collapse = (change: (next: Set<string>) => void) => {
+    const next = new Set(collapsed)
+    change(next)
+    const alive = new Set(all.map((p) => collapseKey(p.owner, p.ghlLocationId)))
+    for (const key of next) if (!alive.has(key)) next.delete(key)
+    setCollapsed(next)
+    rememberCollapsed(next)
+  }
 
   const run = (optimistic: Edit, fn: () => Promise<Done>) =>
     start(async () => {
@@ -152,10 +202,14 @@ export function PendingList({
       setError(r.ok ? null : r.error)
     })
 
-  const add = (body: string, locationId: string | null, name: string | null) =>
+  const add = (body: string, locationId: string | null, name: string | null) => {
+    // Lo recién escrito tiene que verse: si su grupo estaba colapsado, se abre.
+    const key = collapseKey(owner, locationId)
+    if (collapsed.has(key)) collapse((next) => next.delete(key))
     run({ type: "add", pending: draft(body, owner, locationId, name) }, () =>
       createPending({ body, owner, locationId }),
     )
+  }
 
   const move = (moved: string, target: string) => {
     const ids = moveGroup(groups, moved, target)
@@ -199,20 +253,45 @@ export function PendingList({
             groups.filter((g) => g.open.length > 0).length,
             "subcuenta",
             "subcuentas",
-          )} · ${cuenta(done, "hecho", "hechos")}`}
+          )}${
+            waiting > 0 ? ` · ${cuenta(waiting, "no urgente", "no urgentes")}` : ""
+          } · ${cuenta(done, "hecho", "hechos")}`}
           action={
-            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-              <Switch
-                size="sm"
-                checked={showDone}
-                onCheckedChange={setShowDone}
-                // Sin hechos no hay qué encender, pero lo encendido siempre
-                // se puede apagar: al cambiar de pestaña o desmarcar el
-                // último hecho, la cuenta baja a 0 con el interruptor puesto.
-                disabled={done === 0 && !showDone}
-              />
-              Ver tareas realizadas
-            </label>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <Button
+                size="xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                disabled={shownKeys.length === 0}
+                onClick={() =>
+                  collapse((next) => {
+                    for (const key of shownKeys) {
+                      if (allCollapsed) next.delete(key)
+                      else next.add(key)
+                    }
+                  })
+                }
+              >
+                {allCollapsed ? (
+                  <ChevronsUpDownIcon aria-hidden />
+                ) : (
+                  <ChevronsDownUpIcon aria-hidden />
+                )}
+                {allCollapsed ? "Expandir todo" : "Colapsar todo"}
+              </Button>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <Switch
+                  size="sm"
+                  checked={showDone}
+                  onCheckedChange={setShowDone}
+                  // Sin hechos no hay qué encender, pero lo encendido siempre
+                  // se puede apagar: al cambiar de pestaña o desmarcar el
+                  // último hecho, la cuenta baja a 0 con el interruptor puesto.
+                  disabled={done === 0 && !showDone}
+                />
+                Ver tareas realizadas
+              </label>
+            </div>
           }
         >
           <NewPending
@@ -240,6 +319,19 @@ export function PendingList({
                   group={group}
                   grip={grip}
                   showDone={showDone}
+                  collapsed={collapsed.has(collapseKey(owner, group.locationId))}
+                  onCollapse={(value) =>
+                    collapse((next) => {
+                      const key = collapseKey(owner, group.locationId)
+                      if (value) next.add(key)
+                      else next.delete(key)
+                    })
+                  }
+                  onNotUrgent={(id, value) =>
+                    run({ type: "urgency", id, notUrgent: value }, () =>
+                      setPendingNotUrgent(id, value),
+                    )
+                  }
                   onAdd={(body) =>
                     add(body, group.locationId, group.locationId ? group.name : null)
                   }
@@ -460,43 +552,73 @@ function Group({
   group,
   grip,
   showDone,
+  collapsed,
+  onCollapse,
   onAdd,
   onToggle,
+  onNotUrgent,
   onDelete,
 }: {
   group: PendingGroup
   /** Asa de arrastre; `null` en "Sin subcuenta", que no se mueve. */
   grip: React.ReactNode
   showDone: boolean
+  collapsed: boolean
+  onCollapse: (collapsed: boolean) => void
+  onNotUrgent: (id: string, notUrgent: boolean) => void
   onAdd: (body: string) => void
   onToggle: (id: string, done: boolean) => void
   onDelete: (id: string) => void
 }) {
   const rows = showDone ? [...group.open, ...group.done] : group.open
+  const waiting = group.open.filter((p) => p.notUrgent).length
+  const bodyId = useId()
 
   return (
     <section>
       <header className="flex items-center gap-2 bg-muted/40 px-4 py-2">
         {grip ?? <span aria-hidden className="-ml-1.5 size-5 shrink-0" />}
-        <h3 className="truncate text-sm font-medium">{group.name}</h3>
-        <span className="num ml-auto shrink-0 text-xs text-muted-foreground">
+        <h3 className="min-w-0 flex-1 text-sm font-medium">
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-controls={bodyId}
+            title={collapsed ? "Expandir" : "Colapsar"}
+            className="-my-1 flex w-full min-w-0 items-center gap-1.5 rounded-sm py-1 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            onClick={() => onCollapse(!collapsed)}
+          >
+            <ChevronDownIcon
+              aria-hidden
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                collapsed && "-rotate-90",
+              )}
+            />
+            <span className="truncate">{group.name}</span>
+          </button>
+        </h3>
+        <span className="num shrink-0 text-xs text-muted-foreground">
           {group.open.length}
+          {waiting > 0 && ` · ${waiting} no urgente${waiting === 1 ? "" : "s"}`}
           {group.done.length > 0 && ` · ${group.done.length} hecho${group.done.length === 1 ? "" : "s"}`}
         </span>
       </header>
 
-      <ul className="divide-y divide-border">
-        {rows.map((p) => (
-          <Row
-            key={p.id}
-            pending={p}
-            onToggle={(done) => onToggle(p.id, done)}
-            onDelete={() => onDelete(p.id)}
-          />
-        ))}
-      </ul>
+      <div id={bodyId} hidden={collapsed}>
+        <ul className="divide-y divide-border">
+          {rows.map((p) => (
+            <Row
+              key={p.id}
+              pending={p}
+              onToggle={(done) => onToggle(p.id, done)}
+              onNotUrgent={(value) => onNotUrgent(p.id, value)}
+              onDelete={() => onDelete(p.id)}
+            />
+          ))}
+        </ul>
 
-      <AddToGroup name={group.name} onAdd={onAdd} />
+        <AddToGroup name={group.name} onAdd={onAdd} />
+      </div>
     </section>
   )
 }
@@ -504,15 +626,19 @@ function Group({
 function Row({
   pending,
   onToggle,
+  onNotUrgent,
   onDelete,
 }: {
   pending: Pending
   onToggle: (done: boolean) => void
+  onNotUrgent: (notUrgent: boolean) => void
   onDelete: () => void
 }) {
   // Un pendiente que el servidor todavía no confirma no se puede marcar ni
   // borrar: su id no existe en Neon.
   const isDraft = pending.id.startsWith("draft_")
+  // Lo hecho ya no espera nada: ni etiqueta ni botón.
+  const waiting = pending.notUrgent && !pending.done
 
   return (
     <li className="group flex items-start gap-2 py-2 pr-2 pl-4 hover:bg-muted/30">
@@ -527,11 +653,38 @@ function Row({
           className={cn(
             "text-sm leading-snug",
             pending.done && "text-muted-foreground line-through",
+            waiting && "text-muted-foreground",
           )}
         >
           {pending.body}
         </span>
       </label>
+      {waiting && (
+        <StatusChip tone="idle" className="shrink-0">
+          No urgente
+        </StatusChip>
+      )}
+      {!pending.done && (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          className={cn(
+            "shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+            waiting && "text-foreground",
+          )}
+          disabled={isDraft}
+          aria-pressed={pending.notUrgent}
+          title={waiting ? "Quitar “no urgente”" : "Marcar como no urgente"}
+          aria-label={
+            waiting
+              ? `Quitar “no urgente” a “${pending.body}”`
+              : `Marcar “${pending.body}” como no urgente`
+          }
+          onClick={() => onNotUrgent(!pending.notUrgent)}
+        >
+          <ClockIcon />
+        </Button>
+      )}
       <Button
         size="icon-xs"
         variant="ghost"

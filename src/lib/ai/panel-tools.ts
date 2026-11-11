@@ -448,7 +448,7 @@ export const panelTools = {
 
   listPendings: tool({
     description:
-      "Quick to-dos grouped by GHL sub-account (oldest open first). A pending is one sentence, belongs to one team member (Juan Carlos, Isaías Rios or Ivan Salazar) and is optionally tied to a sub-account; no date or priority.",
+      "Quick to-dos grouped by GHL sub-account (oldest open first, those flagged notUrgent after the rest). A pending is one sentence, belongs to one team member (Juan Carlos, Isaías Rios or Ivan Salazar) and is optionally tied to a sub-account; no date, and the only priority is the notUrgent flag (it can wait).",
     inputSchema: z.object({
       owner: z
         .enum(PENDING_OWNERS.map((o) => o.id) as [PendingOwner, ...PendingOwner[]])

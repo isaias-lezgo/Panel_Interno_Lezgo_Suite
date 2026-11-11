@@ -245,7 +245,10 @@ o vencida en rojo, ≤ 7 en amarillo, más en verde, sin fecha en azul.
 
 **Pendientes.** Lo ligero al lado de las implementaciones: una frase y, si
 viene al caso, la subcuenta de la que es (`pendings`). Sin fecha, sin
-prioridad, sin checklist — lo que necesita eso es una implementación. Cada
+checklist — lo que necesita eso es una implementación. La única prioridad
+es "no urgente" (`not_urgent`), que se pone y se quita desde el reloj del
+renglón: lo marcado baja al pie de los abiertos de su grupo, en gris y con
+su etiqueta. Cada
 pendiente es de una persona (`owner`): Juan Carlos, Isaías Rios o Ivan
 Salazar, fijos en `src/lib/pendings/owners.ts`, una pestaña cada uno. Lo que
 se escribe entra en la pestaña abierta, y la última abierta se recuerda en la
@@ -257,7 +260,11 @@ esconde. No se editan: se borran y se vuelven a escribir. Los grupos se
 arrastran arriba y abajo desde el asa de su encabezado (también con teclado:
 espacio, flechas, espacio); cada persona guarda su orden en
 `pending_group_order`, las subcuentas sin lugar van después por nombre y
-"Sin subcuenta" siempre al final. La agrupación vive
+"Sin subcuenta" siempre al final. Cada grupo se colapsa desde su nombre, y
+"Colapsar todo" cierra los que se ven; qué está colapsado es de cada
+navegador y vive en la cookie `pendientes_colapsados`
+(`src/lib/pendings/collapsed.ts`), no en Neon. Escribir en un grupo
+colapsado lo abre. La agrupación vive
 en `src/lib/pendings/group.ts` y corre en el navegador, no en el servidor,
 para que marcar uno lo reordene al instante; el nombre del grupo se resuelve
 en vivo contra GHL y cae al que se guardó al escribirlo. Escribe solo a

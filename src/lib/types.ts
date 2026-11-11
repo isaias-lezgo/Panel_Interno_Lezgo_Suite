@@ -303,6 +303,8 @@ export type Pending = {
   /** Nombre al escribirlo; sirve de respaldo cuando GHL no contesta. */
   ghlLocationName: string | null
   done: boolean
+  /** Puede esperar: baja al pie de los abiertos de su grupo. */
+  notUrgent: boolean
   /** ISO con zona, `null` mientras siga abierto. */
   doneAt: string | null
   /** ISO con zona. */
@@ -314,7 +316,10 @@ export type PendingGroup = {
   /** `null` en el grupo "Sin subcuenta", que siempre va al final. */
   locationId: string | null
   name: string
-  /** El más viejo primero: es el que más lleva esperando. */
+  /**
+   * El más viejo primero: es el que más lleva esperando. Los "no urgentes"
+   * van después, también del más viejo al más nuevo.
+   */
   open: Pending[]
   /** El último hecho primero. */
   done: Pending[]

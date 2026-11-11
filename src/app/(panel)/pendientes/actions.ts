@@ -72,6 +72,26 @@ export async function togglePending(id: string, done: boolean): Promise<Done> {
   return { ok: true }
 }
 
+/**
+ * "No urgente" no es una prioridad: es decir que puede esperar. El renglón
+ * baja al pie de los abiertos de su grupo y se queda ahí hasta que alguien
+ * lo regrese.
+ */
+export async function setPendingNotUrgent(
+  id: string,
+  notUrgent: boolean,
+): Promise<Done> {
+  if (!db) return { ok: false, error: NO_DB }
+  const [row] = await db
+    .update(schema.pendings)
+    .set({ notUrgent: notUrgent === true })
+    .where(eq(schema.pendings.id, id))
+    .returning({ id: schema.pendings.id })
+  if (!row) return { ok: false, error: "Ese pendiente ya no existe." }
+  refresh()
+  return { ok: true }
+}
+
 /** Los pendientes no se editan: se borran y se vuelven a escribir. */
 export async function deletePending(id: string): Promise<Done> {
   if (!db) return { ok: false, error: NO_DB }
