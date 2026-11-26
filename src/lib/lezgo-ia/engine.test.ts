@@ -6,8 +6,12 @@ import { defaultAccountConfig, type AccountConfig } from "./config"
 import {
   composeMessage,
   detectAlerts,
+  emailHtml,
+  hotSignals,
+  leadReply,
   planDeliveries,
   splitMessage,
+  type EngineAppointment,
   type EngineOpportunity,
 } from "./engine"
 
@@ -166,6 +170,174 @@ describe("detectAlerts", () => {
         "1 aviso no sale: es de asesores con los avisos apagados",
       ].join("\n"),
     )
+  })
+})
+
+describe("leads calientes", () => {
+  const msg = (direction: "inbound" | "outbound", minutesAgo: number, body = "") => ({
+    direction,
+    dateAdded: ago(minutesAgo * MIN),
+    body,
+  })
+
+  it("leadReply junta lo que el lead escribió al final y mide cuánto tardó", () => {
+    const reply = leadReply([
+      msg("inbound", 5, "¿aceptan Infonavit?"),
+      msg("inbound", 6, "Hola"),
+      msg("outbound", 10, "Buen día, ¿sigue interesado?"),
+      msg("inbound", 300, "info"),
+    ])
+    expect(reply).toEqual({ text: "Hola\n¿aceptan Infonavit?", replyMs: 4 * MIN })
+  })
+
+  it("leadReply: nada si lo último es nuestro; sin tiempo si nadie le había escrito", () => {
+    expect(leadReply([msg("outbound", 1, "Hola"), msg("inbound", 5, "info")])).toBeNull()
+    expect(leadReply([msg("inbound", 5, "info")])).toEqual({ text: "info", replyMs: null })
+  })
+
+  it("leadReply ignora la actividad que GHL anota como mensaje", () => {
+    const reply = leadReply([
+      { ...msg("outbound", 1), messageType: "TYPE_ACTIVITY_OPPORTUNITY" },
+      msg("inbound", 5, "quiero verla"),
+      msg("outbound", 8, "Hola"),
+    ])
+    expect(reply).toEqual({ text: "quiero verla", replyMs: 3 * MIN })
+  })
+
+  it("hotSignals: respuesta rápida, crédito y visita, con o sin acentos", () => {
+    expect(hotSignals({ text: "ok gracias", replyMs: 3 * MIN })).toEqual(["contestó en 3 min"])
+    expect(hotSignals({ text: "¿Aceptan CRÉDITO Infonavit?", replyMs: 2 * HOUR })).toEqual([
+      "pregunta por crédito",
+    ])
+    expect(hotSignals({ text: "cuando puedo ir a verla?", replyMs: null })).toEqual(["pide visita"])
+    expect(hotSignals({ text: "ok gracias", replyMs: 2 * HOUR })).toEqual([])
+    // "cita" dentro de otra palabra no cuenta.
+    expect(hotSignals({ text: "se solicita informacion", replyMs: null })).toEqual([])
+  })
+
+  const waiting = (minutes: number, text: string, replyMs: number | null = null) =>
+    opp({
+      conversation: {
+        lastMessageAt: ago(minutes * MIN),
+        lastDirection: "inbound",
+        reply: { text, replyMs },
+      },
+    })
+
+  it("avisa del lead que escribió con señal y sigue sin respuesta", () => {
+    const [alert] = detect([waiting(20, "me interesa, ¿puedo agendar una visita?", 4 * MIN)])
+    expect(alert).toMatchObject({
+      kind: "hotLead",
+      settingId: "hotLeads",
+      userId: "ana",
+      line: "Juan Ruiz: contestó en 4 min, pide visita. Espera respuesta hace 20 min",
+    })
+    expect(alert.key).toBe(`hot:o1:${ago(20 * MIN)}`)
+  })
+
+  it("sin señal, con más de un día o sin leer lo que escribió, no avisa", () => {
+    expect(detect([waiting(20, "ok", 2 * HOUR)])).toEqual([])
+    expect(detect([waiting(26 * 60, "quiero una cita")])).toEqual([])
+    expect(
+      detect([opp({ conversation: { lastMessageAt: ago(20 * MIN), lastDirection: "inbound" } })]),
+    ).toEqual([])
+  })
+})
+
+describe("recordatorio de visita", () => {
+  const visit = (patch: Partial<EngineAppointment> = {}): EngineAppointment => ({
+    id: "v1",
+    title: "Visita Depto 4B",
+    // 14:00 en CDMX: dos horas después de `now`.
+    startTime: "2026-09-23T14:00:00-06:00",
+    assignedTo: "ana",
+    leadName: "Juan Ruiz",
+    address: "Av. Juárez 10",
+    ...patch,
+  })
+  const remind = (appointments: EngineAppointment[], acc = account()) =>
+    detectAlerts({ now, account: acc, pipelines, advisors, opportunities: [], appointments })
+
+  it("avisa al asesor de la cita que cae dentro de su anticipación (3 h por defecto)", () => {
+    expect(remind([visit()])).toMatchObject([
+      {
+        kind: "visitReminder",
+        settingId: "appointmentReminder",
+        userId: "ana",
+        key: "visit:v1:2026-09-23T14:00:00-06:00",
+        line: "Hoy 14:00 · Visita Depto 4B · Juan Ruiz · Av. Juárez 10",
+      },
+    ])
+  })
+
+  it("todavía no si falta más que la anticipación; nunca de una que ya empezó", () => {
+    expect(remind([visit({ startTime: "2026-09-23T17:00:00-06:00" })])).toEqual([])
+    expect(remind([visit({ startTime: "2026-09-23T11:30:00-06:00" })])).toEqual([])
+  })
+
+  it("con un día de anticipación dice Mañana; sin asesor va al gerente", () => {
+    const acc = account({
+      settings: {
+        dailySummary: { enabled: false },
+        appointmentReminder: { enabled: true, option: "24h" },
+      },
+    })
+    const [alert] = remind(
+      [visit({ startTime: "2026-09-24T10:00:00-06:00", assignedTo: null, leadName: null, address: null })],
+      acc,
+    )
+    expect(alert).toMatchObject({
+      userId: "manager",
+      line: "Mañana 10:00 · Visita Depto 4B · sin asignar",
+    })
+  })
+
+  it("no repite el nombre del lead si el título ya lo trae", () => {
+    const [alert] = remind([visit({ title: "Juan Ruiz · Recorrido", address: null })])
+    expect(alert.line).toBe("Hoy 14:00 · Juan Ruiz · Recorrido")
+  })
+
+  it("el aviso respeta el interruptor del ajuste", () => {
+    const acc = account({
+      settings: { dailySummary: { enabled: false }, appointmentReminder: { enabled: false, option: "3h" } },
+    })
+    const plan = planDeliveries({
+      alerts: remind([visit()], acc),
+      account: acc,
+      advisors,
+      at: now,
+      sentKeys: new Set(),
+    })
+    expect(plan.deliveries).toEqual([])
+    expect(plan.skipped).toMatchObject([{ reason: "ajuste-apagado" }])
+  })
+})
+
+describe("resumen con periodo vigilado y visitas", () => {
+  it("dice qué periodo vigila cuando lo que quedó fuera es lo más viejo", () => {
+    const alerts = detectAlerts({
+      now,
+      account: account({ settings: { dailySummary: { enabled: true, option: "09:00" } } }),
+      pipelines,
+      advisors,
+      opportunities: [opp({ id: "o1", createdAt: ago(10 * DAY) }), opp({ id: "o2", createdAt: ago(40 * DAY) })],
+      totalOpen: 3030,
+      watchDays: 90,
+      appointments: [],
+    })
+    expect(alerts.at(-1)?.line.split("\n")).toEqual([
+      "3030 oportunidades abiertas; vigilo las 2 de los últimos 90 días, 0 nuevas en las últimas 24 h",
+      "0 leads nuevos sin primer contacto",
+      "0 leads sin contestar",
+      "0 oportunidades sin movimiento en su etapa",
+      "0 visitas por venir hoy",
+    ])
+  })
+})
+
+describe("emailHtml", () => {
+  it("pasa negritas y saltos a HTML y escapa lo demás", () => {
+    expect(emailHtml("*Hola*\nA <b> & c")).toContain("<strong>Hola</strong><br>A &lt;b&gt; &amp; c")
   })
 })
 

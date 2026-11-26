@@ -68,12 +68,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, ignored: "No es para el asistente." })
   }
 
-  // Para saber si la firma de GHL ya basta y se puede quitar el secreto de la URL.
+  // Para saber si la firma de GHL ya basta y se puede quitar el secreto de la
+  // URL. Queda también en Neon (renglón `webhook`): el log de Vercel dura poco.
   console.info(`Lezgo IA: mensaje del contacto de pruebas (firma de GHL ${bySignature ? "válida" : "no válida"})`)
 
   after(async () => {
     try {
-      const result = await answerInbound(contactId)
+      const result = await answerInbound(contactId, {
+        auth: { signature: bySignature, secret: bySecret },
+      })
       if (!result.ok) console.info(`Lezgo IA no contestó: ${result.ignored}`)
     } catch (error) {
       console.error("El asistente de Lezgo IA falló", error)

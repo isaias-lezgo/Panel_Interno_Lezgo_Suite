@@ -19,6 +19,7 @@ import {
 } from "./actions"
 import { cleanBody } from "./assistant"
 import { elapsed } from "./engine"
+import { ghlDate, windowLabel, windowStart } from "./window"
 
 /**
  * Las herramientas del asistente de Lezgo IA: lecturas del CRM de **una**
@@ -27,6 +28,12 @@ import { elapsed } from "./engine"
  *
  * Nunca lanzan: el error de GHL vuelve como `{ ok: false, error }` para que
  * el modelo lo diga en vez de inventar.
+ *
+ * `listLeads` lista el mismo periodo que vigila el motor ("Antigüedad que
+ * vigila") y dice cuántas oportunidades más viejas quedaron fuera. Esas solo
+ * se leen con `incluirAnteriores`, que el modelo usa cuando la persona lo
+ * pide. Buscar por nombre no tiene periodo: quien pregunta por un lead lo
+ * quiere encontrar tenga la edad que tenga.
  *
  * Con `writes` se suman dos herramientas que **sí escriben en el CRM del
  * cliente**: crear una tarea y marcar una oportunidad como perdida. En modo
@@ -62,6 +69,8 @@ export function assistantTools(input: {
   pipelineName: Map<string, string>
   advisorName: Map<string, string>
   now: Date
+  /** Días del periodo vigilado; `null` = todas. */
+  watchDays: number | null
   /** `null` = solo lectura. */
   writes?: AssistantWrites | null
 }) {
@@ -98,21 +107,44 @@ export function assistantTools(input: {
   return {
     listLeads: tool({
       description:
-        "Oportunidades abiertas del CRM, las más recientes primero. Con `query` busca por nombre del lead o de la oportunidad. `total` dice cuántas hay en total aunque solo se devuelvan `limit`.",
+        input.watchDays === null
+          ? "Oportunidades abiertas del CRM, las más recientes primero. Con `query` busca por nombre del lead o de la oportunidad. `total` dice cuántas hay en total aunque solo se devuelvan `limit`."
+          : `Oportunidades abiertas del CRM creadas en ${windowLabel(input.watchDays)} (el periodo que vigilas), las más recientes primero. \`total\` dice cuántas hay en ese periodo aunque solo se devuelvan \`limit\`, y \`anteriores\` cuántas más viejas quedaron fuera. Con \`query\` busca por nombre del lead o de la oportunidad sin límite de edad. Con \`incluirAnteriores: true\` lista también las más viejas: úsalo solo cuando la persona pida ver las anteriores, las viejas o todas.`,
       inputSchema: z.object({
         query: z.string().trim().min(1).max(80).optional(),
         limit: z.number().int().min(1).max(40).optional(),
+        incluirAnteriores: z
+          .boolean()
+          .optional()
+          .describe("true solo si la persona pidió ver también las oportunidades anteriores al periodo vigilado."),
+        orden: z
+          .enum(["recientes", "antiguas"])
+          .optional()
+          .describe("Por fecha de creación. Por defecto, recientes."),
       }),
-      execute: ({ query, limit }) =>
+      execute: ({ query, limit, incluirAnteriores, orden }) =>
         attempt(async () => {
-          const page = await client.searchOpportunities({
-            locationId,
-            status: "open",
-            assignedTo: assignedTo ?? undefined,
-            query,
-            limit: limit ?? 20,
-          })
-          return { total: page.meta.total, leads: page.opportunities.map(row) }
+          const since = query || incluirAnteriores ? null : windowStart(now, input.watchDays)
+          const search = (extra: { date?: string; limit: number }) =>
+            client.searchOpportunities({
+              locationId,
+              status: "open",
+              assignedTo: assignedTo ?? undefined,
+              query,
+              order: orden === "antiguas" ? "added_asc" : undefined,
+              ...extra,
+            })
+          const [page, all] = await Promise.all([
+            search({ date: since ? ghlDate(since) : undefined, limit: limit ?? 20 }),
+            // Cuántas hay sin periodo, para decir cuántas quedaron fuera.
+            since ? search({ limit: 1 }) : null,
+          ])
+          return {
+            periodo: since ? windowLabel(input.watchDays!) : "todas, sin límite de edad",
+            total: page.meta.total,
+            ...(all ? { anteriores: Math.max(0, all.meta.total - page.meta.total) } : {}),
+            leads: page.opportunities.map(row),
+          }
         }),
     }),
 

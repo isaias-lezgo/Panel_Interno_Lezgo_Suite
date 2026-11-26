@@ -1465,9 +1465,9 @@ export async function getLastNotificationTo(testContactId: string) {
 }
 
 /**
- * Cuáles de estos avisos ya salieron (`status = "sent"`) en una corrida
- * anterior del motor de Lezgo IA. Lo fallido o simulado no cuenta: se
- * vuelve a intentar.
+ * Cuáles de estos avisos ya salieron en una corrida anterior del motor de
+ * Lezgo IA: `sent`, o `logged` si el canal de esa persona es "Sin mensaje:
+ * solo bitácora". Lo fallido o simulado no cuenta: se vuelve a intentar.
  */
 export async function getSentNotificationKeys(
   locationId: string,
@@ -1480,7 +1480,7 @@ export async function getSentNotificationKeys(
     .where(
       and(
         eq(schema.lezgoIaNotifications.ghlLocationId, locationId),
-        eq(schema.lezgoIaNotifications.status, "sent"),
+        inArray(schema.lezgoIaNotifications.status, ["sent", "logged"]),
         inArray(schema.lezgoIaNotifications.key, keys),
       ),
     )

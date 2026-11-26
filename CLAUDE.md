@@ -344,15 +344,42 @@ gastar tokens en releer reglas. Sin GHL o Neon, la vista usa `src/data/lezgo-ia.
 **Motor de Lezgo IA** (`src/lib/lezgo-ia/engine.ts` + `run.ts`). Por ahora
 lo dispara a mano "Correr motor ahora" en la configuración de una subcuenta;
 el botón no decide nada, solo corre el motor. Lee las oportunidades abiertas
-y la conversación de cada contacto con la app OAuth, detecta avisos (lead
-nuevo sin primer contacto, lead que dejó de contestar, propuesta de
+del periodo vigilado, la conversación de cada contacto y las citas por venir
+con la app OAuth, detecta avisos (lead nuevo sin primer contacto, lead
+caliente, visita por venir, lead que dejó de contestar, propuesta de
 perdido, etapa sin movimiento según su regla, resumen al gerente), los pasa
-por `shouldNotify` y junta un WhatsApp por destinatario. "Gerente" son los
+por `shouldNotify` y junta un mensaje por destinatario. "Gerente" son los
 admins de la subcuenta. Cada aviso que sale queda en
 `lezgo_ia_notifications` con una `key` estable, y lo que ya tiene un
 renglón `sent` no se repite (el interruptor "Repetir avisos ya enviados" lo
 salta para probar). Lo diferido por horario no se anota: se vuelve a
 detectar en la siguiente corrida. Tope de 10 mensajes por corrida.
+
+Lo que el motor lee de cada ajuste (`src/lib/lezgo-ia/`):
+- **Antigüedad que vigila** (`watchWindow`, `window.ts`): solo las
+  oportunidades creadas en ese periodo —30, 60, 90 (por defecto) o 180 días,
+  o todas—, de la más nueva a la más vieja, con el `date` de GHL. Sigue el
+  tope de 500 por corrida: Amir Cherit tiene 3,072 abiertas, 687 en 90 días y
+  381 en 60. El resumen dice cuántas hay en total y cuántas vigila. El
+  asistente lista ese mismo periodo y dice cuántas quedaron fuera; las lee
+  con `incluirAnteriores` solo si la persona lo pide. Buscar por nombre no
+  tiene periodo.
+- **Recordatorio de visita**: citas de `GET /calendars/events` (una llamada
+  por calendario activo; no hay "todas las de la subcuenta") que empiezan
+  dentro de 1 h, 3 h o un día. Va al `assignedUserId` de la cita, o al
+  gerente. Si GHL no da las citas, la corrida sigue sin ellas.
+- **Leads calientes**: lo último del hilo es del lead, tiene menos de un día
+  y hay señal —contestó en menos de 10 minutos, o nombra crédito o visita—.
+  Son palabras (`hotSignals`), no un modelo. Cuesta una lectura de mensajes
+  solo para los que esperan respuesta hoy.
+- **Análisis de la cartera**: cada cuánto le toca la pasada completa a la
+  subcuenta en el cron (`fullGapMs`): cada hora, cada 4 h o diario. Apagado,
+  la completa no corre sola.
+- **Canal de aviso**, por persona (`channelFor`): WhatsApp; correo
+  (`sendEmail`, mismo contacto, **sin verificar con un envío real**: el
+  contacto de pruebas no tiene correo); o "Sin mensaje: solo bitácora", que
+  se guarda como `crm`, queda `logged` y cuenta como entregado. El asistente
+  solo conversa por WhatsApp.
 
 Los avisos salen por **WhatsApp desde la subcuenta Lezgo Suite** con la app
 de GoGHL ("Whatsapp, iMessage and SMS", proveedor "WhatsApp QR"):
@@ -399,8 +426,11 @@ hace cumplir el código, no el modelo: `proposeAction` anota la propuesta y
 sea que entre proponer y hacer hubo un mensaje del asesor. Propuestas
 (`proposal`) y acciones hechas (`action`) viven en `lezgo_ia_notifications`
 con el detalle en JSON; las acciones son la pestaña Bitácora. Los endpoints
-(`PUT /opportunities/:id/status`, `POST /contacts/:id/tasks`) **no se han
-verificado contra la API real**.
+(`PUT /opportunities/:id/status`, `POST /contacts/:id/tasks`) se verificaron
+contra la API el 16 de noviembre de 2026 en la subcuenta propia, sobre una
+oportunidad de prueba que ya se borró: el estado responde `{ success: true }`
+y la tarea acepta `assignedTo`. Lo que no se ha probado es el camino completo
+por WhatsApp: asesor pide, asistente propone, asesor confirma.
 
 **Gasto en Anthropic.** Cada respuesta del asistente deja un renglón
 `usage` en `lezgo_ia_notifications` con sus tokens y su costo estimado, y la
@@ -411,12 +441,11 @@ estimación —la cifra oficial es la consola de Anthropic— y cuenta desde el
 10 de noviembre de 2026: las respuestas anteriores no guardaron sus tokens.
 El Copiloto del panel no entra en esa cifra.
 
-**Dónde va Lezgo IA** (10 de noviembre de 2026). Probado de punta a punta
+**Dónde va Lezgo IA** (16 de noviembre de 2026). Probado de punta a punta
 con el número de pruebas: el motor avisa, el webhook de la app OAuth recibe
 la respuesta y el asistente contesta consultando el CRM. Publicado con las
 acciones prendidas solo en la subcuenta propia
-(`LEZGO_IA_WRITE_ACTIONS=interna`); **crear tarea y marcar perdido aún no se
-prueban contra GHL**. Falta, y depende de decisiones del equipo:
+(`LEZGO_IA_WRITE_ACTIONS=interna`). Falta, y depende de decisiones del equipo:
 - **Un número de WhatsApp propio para Lezgo IA** antes de escribirle a un
   asesor real. Hoy sale del 442 931 5445, el del equipo: el admin de una
   subcuenta suele ser también el contacto del cliente en Lezgo Suite, y el
@@ -425,10 +454,13 @@ prueban contra GHL**. Falta, y depende de decisiones del equipo:
   entrega por subcuenta.
 - Programar el cron (Make o Vercel Pro): la ruta y sus dos pasadas ya
   están; falta `CRON_SECRET` en Vercel y quien la llame.
-- El motor lee 500 oportunidades por subcuenta y hay subcuentas con más de
-  3,000: falta decidir qué pipelines o qué antigüedad vigilar.
-- Ajustes guardados que nadie lee todavía: recordatorio de visita, análisis
-  de la cartera, leads calientes y canal de aviso.
+- Confirmar que la firma de GHL sola abre el webhook, para quitar el
+  secreto de la URL. Los logs de Vercel en Hobby duran una hora, así que
+  cada pregunta contestada deja un renglón `webhook` en
+  `lezgo_ia_notifications` (`status` `signed` o `unsigned`): basta un mensaje
+  desde el número de pruebas y leer ese renglón.
+- Probar con un envío real el canal de correo y el camino completo de una
+  acción por WhatsApp.
 
 **Cron de Lezgo IA.** `/api/lezgo-ia/cron` corre el motor en las
 subcuentas activas a las que les toca; entra con `Authorization: Bearer
@@ -437,15 +469,17 @@ $CRON_SECRET`. **Nadie la llama todavía**: no hay `vercel.json` ni
 HTTP con ese header) o, con plan Pro, el cron de Vercel; en Hobby el cron
 solo corre una vez al día. Tiene dos pasadas
 (`src/lib/lezgo-ia/schedule.ts`):
-- `?pasada=rapida`: solo oportunidades creadas en el último día y solo el
-  aviso de "lead nuevo sin primer contacto". Para cada 5 o 10 minutos.
-- `?pasada=completa` (o nada): todo lo demás. Una o dos veces al día.
+- `?pasada=rapida`: solo oportunidades creadas en el último día, y de ahí
+  lead nuevo sin primer contacto, lead caliente y visita por venir. Para
+  cada 5 o 10 minutos.
+- `?pasada=completa` (o nada): todo lo demás. Llámala cada hora: a cada
+  subcuenta le toca según su "Análisis de la cartera".
 No caben todas las subcuentas en una llamada, así que se reparte
 (`run-all.ts`): primero la que lleva más tiempo sin revisarse, y las que no
 alcanzan vuelven en `pending` para la siguiente llamada. Cada corrida deja
 un renglón `run` en `lezgo_ia_notifications`; de ahí sale a quién le toca.
-Una subcuenta no repite la misma pasada antes de 4 minutos (rápida) o 6
-horas (completa).
+Una subcuenta no repite la rápida antes de 4 minutos, ni la completa antes
+de lo que diga su ajuste (menos 10 minutos de margen).
 
 **Lezgo IA en la subcuenta propia.** La subcuenta Lezgo Suite aparece en
 Lezgo IA como "Equipo Lezgo (interna)" aunque no sea de ningún cliente, y
@@ -505,7 +539,7 @@ pnpm build        # build de producción
 pnpm start        # sirve el build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest, 25 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
+pnpm test         # vitest, 26 archivos: Stripe y cobranza, clientes, filtros, entregas, pendientes, Lezgo IA, ritmo de GHL, hora, reintento y sesión
 pnpm db:push      # aplica el esquema a Neon — interactivo, necesita TTY
 pnpm db:generate  # escribe el SQL de la migración en drizzle/
 pnpm db:seed      # carga src/data/demo.ts en Neon — VACÍA las tablas primero

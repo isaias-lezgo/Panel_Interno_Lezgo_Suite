@@ -25,6 +25,8 @@ import {
  * - `resolveAdvisor(account, userId)` → ajustes efectivos del asesor.
  * - `stageRuleFor(account, pipelineId, stageId)` → qué tolera esa etapa.
  * - `shouldNotify({ account, userId, settingId, at })` → decisión final.
+ * - `channelFor(account, userId)` → por dónde le sale el aviso.
+ * - `enabledForAnyone(account, settingId)` → si vale la pena leer GHL.
  * La lectura desde Neon está en `getLezgoIaConfig` del repositorio.
  */
 
@@ -211,6 +213,30 @@ export function resolveAdvisor(account: AccountConfig, userId: string) {
     away: own?.away ?? null,
     settings: { ...baseSettings, ...account.settings, ...(own?.settings ?? {}) },
   }
+}
+
+export type Channel = "whatsapp" | "email" | "log"
+
+/**
+ * Por dónde sale el aviso de esta persona ("Canal de aviso"). "log" es la
+ * opción "Sin mensaje: solo bitácora", que se guarda como "crm". Para
+ * "manager" valen los ajustes del equipo.
+ */
+export function channelFor(account: AccountConfig, userId: string): Channel {
+  const option = resolveAdvisor(account, userId).settings.channel?.option
+  return option === "email" ? "email" : option === "crm" ? "log" : "whatsapp"
+}
+
+/**
+ * ¿Alguien tiene prendido este ajuste, sea el equipo o un asesor con valor
+ * propio? Si nadie, el motor se ahorra las lecturas a GHL que lo alimentan.
+ */
+export function enabledForAnyone(account: AccountConfig, settingId: string) {
+  const team = { ...baseSettings, ...account.settings }
+  return (
+    team[settingId]?.enabled === true ||
+    Object.values(account.advisors).some((a) => a.settings[settingId]?.enabled === true)
+  )
 }
 
 export function stageRuleFor(

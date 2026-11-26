@@ -21,6 +21,7 @@ export const deliveryLabel = {
   sent: { label: "Enviado", tone: "live" },
   failed: { label: "No salió", tone: "risk" },
   simulated: { label: "Simulado", tone: "idle" },
+  logged: { label: "Solo bitácora", tone: "idle" },
 } as const
 
 /**
@@ -108,6 +109,11 @@ export function ThreadView({
         {thread.delivery?.status === "simulated" && (
           <p className="mt-1 text-xs text-muted-foreground">
             Corrida simulada: este mensaje no se mandó a nadie.
+          </p>
+        )}
+        {thread.delivery?.status === "logged" && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            El canal de aviso de esta persona es &quot;Sin mensaje&quot;: quedó anotado y no se mandó.
           </p>
         )}
         {thread.delivery?.status === "failed" && (

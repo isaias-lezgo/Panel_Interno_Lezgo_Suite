@@ -41,6 +41,15 @@ export const WHATSAPP_INSTANCE = 2
  * antes de entregar. Que GHL acepte no garantiza la entrega: GoGHL puede
  * fallar después (teléfono desconectado, destino sin WhatsApp).
  */
+/**
+ * Manda un correo a un contacto de Lezgo Suite, por el canal de correo de la
+ * subcuenta. El contacto necesita correo: sin él GHL responde error y el
+ * aviso queda como fallido. **Sin verificar con un envío real.**
+ */
+export function sendEmail(contactId: string, subject: string, html: string) {
+  return lezgoSuite.sendMessage({ type: "Email", contactId, subject, html })
+}
+
 export function sendWhatsApp(contactId: string, text: string) {
   return lezgoSuite.sendMessage({
     type: "SMS",

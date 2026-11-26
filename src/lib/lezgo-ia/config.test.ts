@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  channelFor,
   defaultAccountConfig,
+  enabledForAnyone,
   idleMs,
   resolveAdvisor,
   saveAccountInput,
@@ -128,5 +130,40 @@ describe("saveAccountInput", () => {
       ],
     })
     expect(r.success).toBe(false)
+  })
+})
+
+describe("channelFor", () => {
+  it("WhatsApp por defecto; cada asesor puede tener el suyo", () => {
+    const acc = account({
+      advisors: {
+        ana: { userId: "ana", alerts: true, settings: { channel: { enabled: true, option: "email" } }, away: null },
+        beto: { userId: "beto", alerts: true, settings: { channel: { enabled: true, option: "crm" } }, away: null },
+      },
+    })
+    expect(channelFor(account(), "ana")).toBe("whatsapp")
+    expect(channelFor(acc, "ana")).toBe("email")
+    expect(channelFor(acc, "beto")).toBe("log")
+    // El gerente sigue al equipo.
+    expect(channelFor(acc, "manager")).toBe("whatsapp")
+  })
+})
+
+describe("enabledForAnyone", () => {
+  it("vale el equipo o cualquier asesor con valor propio", () => {
+    const off = { hotLeads: { enabled: false } }
+    expect(enabledForAnyone(account(), "hotLeads")).toBe(true)
+    expect(enabledForAnyone(account({ settings: off }), "hotLeads")).toBe(false)
+    expect(
+      enabledForAnyone(
+        account({
+          settings: off,
+          advisors: {
+            ana: { userId: "ana", alerts: true, settings: { hotLeads: { enabled: true } }, away: null },
+          },
+        }),
+        "hotLeads",
+      ),
+    ).toBe(true)
   })
 })

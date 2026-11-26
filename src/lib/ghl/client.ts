@@ -140,6 +140,23 @@ export type GhlConversation = {
   lastMessageDate?: number
   lastMessageDirection?: "inbound" | "outbound"
   lastMessageType?: string
+  /** Texto del último mensaje, recortado por GHL. */
+  lastMessageBody?: string
+}
+
+/** Una cita de `GET /calendars/events`. Las horas traen su zona ("…-06:00"). */
+export type GhlCalendarEvent = {
+  id: string
+  calendarId: string
+  title?: string
+  address?: string
+  startTime: string
+  endTime?: string
+  contactId?: string
+  assignedUserId?: string
+  /** "confirmed", "new", "showed", "cancelled", "noshow" o "invalid". */
+  appointmentStatus?: string
+  deleted?: boolean
 }
 
 export type GhlMessage = {
@@ -345,15 +362,22 @@ export class GhlClient {
     )
   }
 
-  /** Cambia solo el estado: abierta, ganada, perdida o abandonada. */
+  /**
+   * Cambia solo el estado: abierta, ganada, perdida o abandonada. Verificado
+   * contra la API el 16 nov 2026: responde `{ success: true }` (aquí sin la
+   * errata de los borrados).
+   */
   setOpportunityStatus(opportunityId: string, status: GhlOpportunity["status"]) {
-    return this.request<{ succeded?: boolean }>(`/opportunities/${opportunityId}/status`, {
+    return this.request<{ success?: boolean }>(`/opportunities/${opportunityId}/status`, {
       method: "PUT",
       body: { status },
     })
   }
 
-  /** Tarea en un contacto. `dueDate` es un instante ISO. */
+  /**
+   * Tarea en un contacto. `dueDate` es un instante ISO. Verificado contra la
+   * API el 16 nov 2026, con y sin `assignedTo` (id de usuario de GHL).
+   */
   createTask(
     contactId: string,
     input: { title: string; body?: string; dueDate: string; assignedTo?: string },
@@ -505,10 +529,31 @@ export class GhlClient {
   }
 
   listCalendars(locationId?: string) {
-    return this.request<{ calendars: { id: string; name: string }[] }>(
+    return this.request<{ calendars: { id: string; name: string; isActive?: boolean }[] }>(
       "/calendars/",
       { query: { locationId: this.locationOrThrow(locationId) } },
     )
+  }
+
+  /**
+   * Citas de un calendario entre dos instantes (epoch en milisegundos). GHL
+   * exige `calendarId`, `userId` o `groupId`: no hay "todas las de la
+   * subcuenta" en una sola llamada.
+   */
+  listCalendarEvents(params: {
+    locationId?: string
+    calendarId: string
+    startTime: number
+    endTime: number
+  }) {
+    return this.request<{ events: GhlCalendarEvent[] }>("/calendars/events", {
+      query: {
+        locationId: this.locationOrThrow(params.locationId),
+        calendarId: params.calendarId,
+        startTime: params.startTime,
+        endTime: params.endTime,
+      },
+    })
   }
 }
 

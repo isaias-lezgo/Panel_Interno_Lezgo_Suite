@@ -8,12 +8,13 @@ import {
   type AccountConfig,
   type NotifyDecision,
 } from "./config"
+import { windowLabel } from "./window"
 
 /**
  * El motor de Lezgo IA, en dos pasos sin red ni base de datos:
  *
- * 1. `detectAlerts` mira las oportunidades abiertas y decide qué amerita un
- *    aviso y para quién (el asesor asignado o "manager").
+ * 1. `detectAlerts` mira las oportunidades abiertas y las citas por venir, y
+ *    decide qué amerita un aviso y para quién (el asesor asignado o "manager").
  * 2. `planDeliveries` pasa cada aviso por `shouldNotify` —IA activa, avisos
  *    del asesor, el ajuste, fuera de oficina, días y horario— y junta lo
  *    que sí sale en un mensaje por persona.
@@ -39,6 +40,11 @@ export type EngineOpportunity = {
   conversation: {
     lastMessageAt: string
     lastDirection: "inbound" | "outbound"
+    /**
+     * Lo que el lead escribió y nadie ha contestado. Solo se busca cuando lo
+     * último del hilo es suyo y tiene menos de un día.
+     */
+    reply?: LeadReply | null
   } | null
   /**
    * Primer mensaje de salida después de que entró el lead. Solo se busca en
@@ -47,8 +53,29 @@ export type EngineOpportunity = {
   firstContactAt?: string | null
 }
 
+/** Lo último que escribió el lead, con lo que tardó en contestarnos. */
+export type LeadReply = {
+  text: string
+  /** Del último mensaje nuestro a su respuesta. `null` = escribió sin que le escribieran. */
+  replyMs: number | null
+}
+
+/** Una cita por venir en el calendario de la subcuenta. */
+export type EngineAppointment = {
+  id: string
+  title: string
+  /** Instante de inicio, con su zona. */
+  startTime: string
+  /** Id de GHL del asesor que la atiende. */
+  assignedTo: string | null
+  leadName: string | null
+  address: string | null
+}
+
 export type AlertKind =
   | "newLeadUntouched"
+  | "hotLead"
+  | "visitReminder"
   | "abandonedLead"
   | "suggestLost"
   | "stageIdle"
@@ -69,11 +96,15 @@ export type Alert = {
 
 /** Oportunidades de las que se avisa por corrida. Las demás, en la siguiente. */
 export const MAX_FLAGGED = 50
+/** Oportunidades abiertas que se leen por corrida (páginas de 100). */
+export const MAX_READ = 500
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 export const alertKindLabel: Record<AlertKind, string> = {
   newLeadUntouched: "Lead nuevo sin primer contacto",
+  hotLead: "Leads calientes",
+  visitReminder: "Visitas por venir",
   abandonedLead: "Leads que dejaron de contestar",
   suggestLost: "Propuestos para perdido",
   stageIdle: "Sin movimiento en su etapa",
@@ -92,6 +123,65 @@ export function elapsed(ms: number) {
   return days === 1 ? "1 día" : `${days} días`
 }
 
+/* -------------------------------------------------------- leads calientes */
+
+/** Un lead que contesta en menos de esto está pendiente del teléfono. */
+export const FAST_REPLY_MS = 10 * MIN
+
+const CREDIT = /\b(creditos?|infonavit|fovissste|hipotecas?|hipotecario|financiamiento|enganche|mensualidad(es)?|precalificacion)\b/
+const VISIT = /\b(visita(r|rla|rlo)?|verl[ao]s?|conocerl[ao]s?|conocer (el|la|los|las)|recorrido|agendar|cita|mostrar(me)?|cuando puedo (ir|pasar|verl[ao]))\b/
+
+/**
+ * De los mensajes de una conversación (del más reciente al más viejo), lo
+ * que el lead escribió al final sin que nadie le conteste. `null` si lo
+ * último es nuestro. La actividad que GHL anota como mensaje no cuenta.
+ */
+export function leadReply(
+  messages: {
+    direction: "inbound" | "outbound"
+    dateAdded: string
+    body?: string
+    messageType?: string
+  }[],
+): LeadReply | null {
+  const real = messages.filter((m) => !m.messageType?.startsWith("TYPE_ACTIVITY"))
+  const run: typeof real = []
+  for (const m of real) {
+    if (m.direction !== "inbound") break
+    run.push(m)
+  }
+  if (run.length === 0) return null
+  const before = real[run.length]
+  const first = run[run.length - 1]
+  return {
+    text: [...run]
+      .reverse()
+      .map((m) => m.body ?? "")
+      .join("\n")
+      .slice(0, 1_000),
+    replyMs: before ? Math.max(0, Date.parse(first.dateAdded) - Date.parse(before.dateAdded)) : null,
+  }
+}
+
+/**
+ * Por qué este lead está caliente: contestó rápido, pregunta por crédito o
+ * pide ver la propiedad. Vacío = no hay señal. Son palabras, no un modelo:
+ * mismas entradas, mismas señales, sin gastar tokens.
+ */
+export function hotSignals(reply: LeadReply): string[] {
+  const text = reply.text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+  return [
+    ...(reply.replyMs !== null && reply.replyMs <= FAST_REPLY_MS
+      ? [`contestó en ${elapsed(reply.replyMs)}`]
+      : []),
+    ...(CREDIT.test(text) ? ["pregunta por crédito"] : []),
+    ...(VISIT.test(text) ? ["pide visita"] : []),
+  ]
+}
+
 /* -------------------------------------------------------------- detección */
 
 /**
@@ -101,8 +191,12 @@ export function elapsed(ms: number) {
  * - **Lead que dejó de contestar**: el último mensaje es nuestro y lleva más
  *   de lo configurado sin respuesta. Pasado el umbral de "Sugerir mover a
  *   perdido" (si está prendido), se propone perderlo en su lugar.
+ * - **Lead caliente**: lo último del hilo es del lead, tiene menos de un
+ *   día y trae una señal (`hotSignals`). Se avisa una vez por mensaje.
  * - **Etapa sin movimiento**: lleva en su etapa más de lo que tolera la
  *   regla de esa etapa; la acción de la regla dice a quién y qué proponer.
+ * - **Visita por venir**: una cita del calendario que empieza dentro de lo
+ *   que pide "Recordatorio de visita" (1 h, 3 h o un día antes).
  * - **Resumen del día** al gerente, pasada la hora configurada.
  * Un lead sin asignar se le avisa al gerente. Un contacto con dos
  * oportunidades tiene una sola conversación: lo que sale de ella —lead
@@ -116,6 +210,10 @@ export function detectAlerts(input: {
   opportunities: EngineOpportunity[]
   /** Abiertas en GHL, si son más de las que se leyeron. */
   totalOpen?: number
+  /** Días del periodo vigilado; `null` o nada = se leyó sin límite de edad. */
+  watchDays?: number | null
+  /** Las citas por venir. Sin esto no hay recordatorios ni se cuentan en el resumen. */
+  appointments?: EngineAppointment[]
 }): Alert[] {
   const { now, account, pipelines, opportunities } = input
   const told = new Set<string>()
@@ -180,6 +278,22 @@ export function detectAlerts(input: {
       }
     }
 
+    // Lead caliente: escribió hace poco, nadie le contesta y hay señal.
+    if (conv?.lastDirection === "inbound" && conv.reply) {
+      const waiting = at - Date.parse(conv.lastMessageAt)
+      const signals = hotSignals(conv.reply)
+      if (waiting < DAY && signals.length > 0 && once("hot")) {
+        alerts.push({
+          key: `hot:${opp.id}:${conv.lastMessageAt}`,
+          kind: "hotLead",
+          settingId: "hotLeads",
+          userId: owner,
+          line: `${who}: ${signals.join(", ")}. Espera respuesta hace ${elapsed(waiting)}`,
+          opportunityId: opp.id,
+        })
+      }
+    }
+
     // Etapa sin movimiento.
     const rule = stageRuleFor(account, opp.pipelineId, opp.stageId)
     const tolerance = idleMs(rule.idle)
@@ -207,7 +321,50 @@ export function detectAlerts(input: {
     }
   }
 
-  const summary = dailySummary({ now, account, opportunities, alerts, totalOpen: input.totalOpen })
+  // Visitas por venir.
+  const today = localTime(now, account.timezone).date
+  const tomorrow = localTime(new Date(at + DAY), account.timezone).date
+  for (const visit of input.appointments ?? []) {
+    const owner = visit.assignedTo ?? "manager"
+    const ahead = idleMs(resolveAdvisor(account, owner).settings.appointmentReminder?.option ?? "3h")
+    const until = Date.parse(visit.startTime) - at
+    if (ahead === null || Number.isNaN(until) || until <= 0 || until > ahead) continue
+    const local = localTime(new Date(visit.startTime), account.timezone)
+    const day =
+      local.date === today
+        ? "Hoy"
+        : local.date === tomorrow
+          ? "Mañana"
+          : `${local.date.slice(8)}/${local.date.slice(5, 7)}`
+    const title = visit.title.trim() || "Cita"
+    // El título de una cita de GHL suele traer ya el nombre del lead.
+    const leadName =
+      visit.leadName && !title.toLowerCase().includes(visit.leadName.toLowerCase())
+        ? visit.leadName
+        : null
+    const where = visit.address?.trim().slice(0, 80) || null
+    alerts.push({
+      key: `visit:${visit.id}:${visit.startTime}`,
+      kind: "visitReminder",
+      settingId: "appointmentReminder",
+      userId: owner,
+      line: [`${day} ${local.time}`, title, leadName, where, visit.assignedTo ? null : "sin asignar"]
+        .filter(Boolean)
+        .join(" · "),
+    })
+  }
+
+  const summary = dailySummary({
+    now,
+    account,
+    opportunities,
+    alerts,
+    totalOpen: input.totalOpen,
+    watchDays: input.watchDays,
+    visitsToday: input.appointments?.filter(
+      (v) => localTime(new Date(v.startTime), account.timezone).date === today,
+    ).length,
+  })
   if (summary) alerts.push(summary)
   return alerts
 }
@@ -236,6 +393,9 @@ function dailySummary(input: {
   opportunities: EngineOpportunity[]
   alerts: Alert[]
   totalOpen?: number
+  watchDays?: number | null
+  /** Citas que faltan hoy; `undefined` = no se leyó el calendario. */
+  visitsToday?: number
 }): Alert | null {
   const { now, account, opportunities, alerts } = input
   const setting = resolveAdvisor(account, "manager").settings.dailySummary
@@ -247,9 +407,17 @@ function dailySummary(input: {
   const count = (kind: AlertKind) => alerts.filter((a) => a.kind === kind).length
   const read = opportunities.length
   const total = Math.max(input.totalOpen ?? read, read)
+  // Si lo que quedó fuera es más viejo que el periodo vigilado, se dice así;
+  // si ni el periodo cupo en la corrida, "revisé" a secas.
+  const allOfWindow =
+    input.watchDays != null &&
+    opportunities.every((o) => at - Date.parse(o.createdAt) <= input.watchDays! * DAY) &&
+    read < MAX_READ
   const open =
     total > read
-      ? `${total} oportunidades abiertas; revisé ${read}`
+      ? allOfWindow
+        ? `${total} oportunidades abiertas; vigilo ${read === 1 ? "la" : `las ${read}`} de ${windowLabel(input.watchDays!)}`
+        : `${total} oportunidades abiertas; revisé ${read}`
       : plural(read, "oportunidad abierta", "oportunidades abiertas")
   // Avisos que nadie recibe porque su asesor tiene los avisos apagados.
   const muted = alerts.filter(
@@ -258,8 +426,14 @@ function dailySummary(input: {
   const lines = [
     `${open}, ${plural(fresh, "nueva", "nuevas")} en las últimas 24 h`,
     plural(count("newLeadUntouched"), "lead nuevo", "leads nuevos") + " sin primer contacto",
+    ...(count("hotLead") > 0
+      ? [plural(count("hotLead"), "lead caliente", "leads calientes") + " esperando respuesta"]
+      : []),
     plural(count("abandonedLead") + count("suggestLost"), "lead", "leads") + " sin contestar",
     plural(count("stageIdle"), "oportunidad", "oportunidades") + " sin movimiento en su etapa",
+    ...(input.visitsToday === undefined
+      ? []
+      : [plural(input.visitsToday, "visita", "visitas") + " por venir hoy"]),
     ...(muted > 0
       ? [
           plural(muted, "aviso no sale: es", "avisos no salen: son") +
@@ -405,7 +579,9 @@ function recipientFor(
 
 const order: AlertKind[] = [
   "dailySummary",
+  "visitReminder",
   "newLeadUntouched",
+  "hotLead",
   "stageIdle",
   "abandonedLead",
   "suggestLost",
@@ -463,6 +639,21 @@ export function composeMessage(input: {
   }
 
   return parts.join("\n\n")
+}
+
+/**
+ * El mismo mensaje, para correo: el formato de WhatsApp (*negritas*, saltos
+ * de línea) pasado a HTML, con todo lo demás escapado.
+ */
+export function emailHtml(text: string) {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+  return `<div style="font-family:sans-serif;font-size:14px;line-height:1.5">${escaped
+    .replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>")}</div>`
 }
 
 /**

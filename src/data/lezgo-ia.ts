@@ -181,12 +181,26 @@ export const settingGroups: SettingGroup[] = [
         id: "appointmentReminder",
         label: "Recordatorio de visita",
         description:
-          "Recuerda al asesor la visita agendada, con los datos del lead y de la propiedad.",
+          "Recuerda al asesor la cita que tiene en el calendario del CRM, con la hora, el lead y el lugar.",
         control: "switch+select",
         options: [
           { value: "1h", label: "1 h antes" },
           { value: "3h", label: "3 h antes" },
           { value: "24h", label: "Un día antes" },
+        ],
+      },
+      {
+        id: "watchWindow",
+        label: "Antigüedad que vigila",
+        description:
+          "La IA revisa las oportunidades abiertas creadas en este periodo, de la más nueva a la más vieja. Las anteriores solo las lee el asistente cuando el asesor se lo pide. Vale para toda la subcuenta.",
+        control: "fixed",
+        options: [
+          { value: "30", label: "Últimos 30 días" },
+          { value: "60", label: "Últimos 60 días" },
+          { value: "90", label: "Últimos 90 días" },
+          { value: "180", label: "Últimos 6 meses" },
+          { value: "all", label: "Todas" },
         ],
       },
     ],
@@ -200,7 +214,7 @@ export const settingGroups: SettingGroup[] = [
         id: "analysisFrequency",
         label: "Análisis de la cartera",
         description:
-          "Revisa las oportunidades abiertas y señala las que se enfrían o se calientan.",
+          "Cada cuánto la IA revisa toda la cartera: leads sin contestar, etapas sin movimiento y propuestas de perdido. Apagado, solo avisa de leads nuevos, leads calientes y visitas. Vale para toda la subcuenta.",
         control: "switch+select",
         options: [
           { value: "1h", label: "Cada hora" },
@@ -224,7 +238,7 @@ export const settingGroups: SettingGroup[] = [
         id: "hotLeads",
         label: "Detección de leads calientes",
         description:
-          "Avisa cuando un lead contesta rápido, pregunta por crédito o pide ver la propiedad.",
+          "Avisa cuando un lead escribe y sigue sin respuesta, si contestó en menos de 10 minutos, pregunta por crédito o pide ver la propiedad.",
         control: "switch",
       },
     ],
@@ -237,12 +251,14 @@ export const settingGroups: SettingGroup[] = [
       {
         id: "channel",
         label: "Canal de aviso",
-        description: "Los avisos al asesor salen por este canal.",
+        description:
+          "Por dónde salen los avisos al asesor. El asistente solo conversa por WhatsApp.",
         control: "fixed",
         options: [
           { value: "whatsapp", label: "WhatsApp" },
           { value: "email", label: "Correo" },
-          { value: "crm", label: "Solo dentro del CRM" },
+          // El valor guardado sigue siendo "crm": así se llamaba la opción.
+          { value: "crm", label: "Sin mensaje: solo bitácora" },
         ],
       },
       {
@@ -315,6 +331,7 @@ export const baseSettings: SettingValues = {
   suggestLost: { enabled: true, option: "7" },
   newLeadUntouched: { enabled: true, option: "30" },
   appointmentReminder: { enabled: true, option: "3h" },
+  watchWindow: { enabled: true, option: "90" },
   analysisFrequency: { enabled: true, option: "1h" },
   dailySummary: { enabled: true, option: "09:00" },
   hotLeads: { enabled: true },
@@ -738,7 +755,7 @@ export type Thread = {
    */
   recipientName?: string
   /** Solo en hilos que vienen del motor: qué pasó con el WhatsApp. */
-  delivery?: { status: "sent" | "failed" | "simulated"; error?: string }
+  delivery?: { status: "sent" | "failed" | "simulated" | "logged"; error?: string }
 }
 
 export const threads: Thread[] = [

@@ -1,27 +1,40 @@
 import "server-only"
 
 import { db, schema } from "@/db"
-import { GhlError, type GhlClient, type GhlOpportunity } from "@/lib/ghl/client"
+import {
+  GhlError,
+  type GhlClient,
+  type GhlMessage,
+  type GhlOpportunity,
+} from "@/lib/ghl/client"
 import { ghlFor } from "@/lib/ghl/for-location"
 import { createPacedReader } from "@/lib/ghl/pace"
-import { lezgoSuiteEnabled, sendWhatsApp } from "@/lib/ghl/lezgo-suite"
+import { lezgoSuiteEnabled, sendEmail, sendWhatsApp } from "@/lib/ghl/lezgo-suite"
 import { mapLimit } from "@/lib/map-limit"
 import { getLezgoIaConfig, getLezgoIaData, getSentNotificationKeys } from "@/lib/repository"
 
-import type { NotifyDecision } from "./config"
+import { channelFor, enabledForAnyone, type NotifyDecision } from "./config"
 import type { Pass } from "./schedule"
 import {
   composeMessage,
   detectAlerts,
+  emailHtml,
+  leadReply,
+  MAX_READ,
   planDeliveries,
   splitMessage,
+  type AlertKind,
+  type EngineAppointment,
   type EngineOpportunity,
 } from "./engine"
+import { ghlDate, watchDays, windowStart } from "./window"
 
 /**
  * Una corrida del motor sobre una subcuenta: lee sus oportunidades abiertas
- * y sus conversaciones en GHL, decide con `engine.ts` y manda un WhatsApp
- * por destinatario desde la subcuenta Lezgo Suite.
+ * del periodo vigilado ("Antigüedad que vigila"), sus conversaciones y las
+ * citas por venir en GHL, decide con `engine.ts` y manda un aviso por
+ * destinatario desde la subcuenta Lezgo Suite, por el canal de cada quien:
+ * WhatsApp, correo o solo bitácora.
  *
  * **Todavía no le escribe a nadie real.** Con `LEZGO_IA_TEST_CONTACT_ID`,
  * cada mensaje llega a ese contacto con el destinatario de verdad en el
@@ -29,12 +42,16 @@ import {
  * bitácora, pero no manda nada. Mandar al teléfono de cada asesor es el
  * siguiente paso y necesita su contacto en Lezgo Suite.
  *
- * Lee de GHL y escribe solo dos cosas: los mensajes de WhatsApp y su
- * renglón en `lezgo_ia_notifications`.
+ * Lee de GHL y escribe solo dos cosas: los mensajes (WhatsApp o correo) y
+ * su renglón en `lezgo_ia_notifications`.
  */
 
 /** Oportunidades abiertas que se leen por corrida (páginas de 100). */
-const MAX_OPPORTUNITIES = 500
+const MAX_OPPORTUNITIES = MAX_READ
+/** Hasta dónde se leen citas: el recordatorio más largo es de un día. */
+const VISIT_HORIZON_MS = 25 * 3_600_000
+/** Lo que la pasada rápida puede decir con lo poco que lee. */
+const QUICK_KINDS: AlertKind[] = ["newLeadUntouched", "hotLead", "visitReminder"]
 /** Mensajes por corrida: en pruebas todos caen en el mismo teléfono. */
 const MAX_MESSAGES = 10
 /**
@@ -53,10 +70,23 @@ export type RunSummary = {
   /** La IA de la subcuenta no está activa: no se revisó nada. */
   inactive: boolean
   opportunities: number
-  /** Hay más oportunidades abiertas de las que se leyeron. */
+  /** Hay más oportunidades en el periodo de las que se leyeron. */
   truncated: boolean
+  /** Días del periodo vigilado; `null` = todas. En la rápida, 1. */
+  watchDays: number | null
+  /** Abiertas en la subcuenta, tengan la edad que tengan. */
+  totalOpen: number
+  /** Citas por venir en 25 h. `null` = no se leyó: nadie tiene recordatorios o GHL falló. */
+  visits: number | null
   alerts: number
-  messages: { recipient: string; alerts: number; status: "sent" | "failed" | "simulated"; error?: string }[]
+  messages: {
+    recipient: string
+    alerts: number
+    channel: "whatsapp" | "email" | "log"
+    /** `logged`: su canal es "Sin mensaje", quedó solo en la bitácora. */
+    status: "sent" | "failed" | "simulated" | "logged"
+    error?: string
+  }[]
   /** Destinatarios que quedan para la siguiente corrida por el tope de mensajes. */
   postponed: number
   deferred: number
@@ -88,6 +118,7 @@ export async function runLezgoIa(
 
   const testContactId = process.env.LEZGO_IA_TEST_CONTACT_ID || null
   const config = await getLezgoIaConfig(locationId, account.timezone)
+  const days = pass === "quick" ? 1 : watchDays(config.settings)
   const summary: RunSummary = {
     ok: true,
     location: account.name,
@@ -96,6 +127,9 @@ export async function runLezgoIa(
     inactive: config.status !== "active",
     opportunities: 0,
     truncated: false,
+    watchDays: days,
+    totalOpen: 0,
+    visits: null,
     alerts: 0,
     messages: [],
     postponed: 0,
@@ -108,26 +142,40 @@ export async function runLezgoIa(
   if (summary.inactive) return summary
 
   let opportunities: EngineOpportunity[]
+  let appointments: EngineAppointment[] | undefined
   let totalOpen = 0
   try {
     const client = await ghlFor(locationId)
     // Un solo ritmo para toda la corrida: páginas, conversaciones y mensajes.
     const paced = createPacedReader()
-    const read = await readOpportunities(
-      client,
-      locationId,
-      paced,
-      pass === "quick" ? new Date(Date.now() - DAY_MS) : null,
-    )
+    const since = windowStart(new Date(), days)
+    const read = await readOpportunities(client, locationId, paced, since)
     summary.truncated = read.truncated
-    totalOpen = read.total
-    opportunities = await withConversations(client, locationId, read.opportunities, paced)
+    // Con periodo, el total de GHL es el de su filtro: el de la subcuenta se pregunta aparte.
+    totalOpen =
+      since && pass === "full"
+        ? (await paced(() => client.searchOpportunities({ locationId, status: "open", limit: 1 })))
+            .meta.total
+        : read.total
+    opportunities = await withConversations(client, locationId, read.opportunities, paced, {
+      hot: enabledForAnyone(config, "hotLeads"),
+    })
+    if (enabledForAnyone(config, "appointmentReminder")) {
+      // Sin citas el resto de la corrida sigue: es una lectura más, no la base.
+      try {
+        appointments = await readAppointments(client, locationId, paced, opportunities)
+        summary.visits = appointments.length
+      } catch (error) {
+        console.error(`El motor de Lezgo IA no leyó las citas de ${locationId}`, error)
+      }
+    }
   } catch (error) {
     console.error(`El motor de Lezgo IA no leyó ${locationId}`, error)
     const detail = error instanceof GhlError ? ` (${error.status}: ${error.message})` : ""
     return { ok: false, error: `GHL no devolvió las oportunidades de la subcuenta${detail}.` }
   }
   summary.opportunities = opportunities.length
+  summary.totalOpen = Math.max(totalOpen, opportunities.length)
 
   const now = new Date()
   const detected = detectAlerts({
@@ -137,11 +185,14 @@ export async function runLezgoIa(
     advisors: account.advisors,
     opportunities,
     totalOpen,
+    watchDays: days,
+    appointments,
   })
-  // La pasada rápida solo vio leads de un día: lo único que puede decir con
-  // certeza es quién sigue sin primer contacto. El resto es de la completa.
+  // La pasada rápida solo vio leads de un día: puede decir quién sigue sin
+  // primer contacto, quién escribió con prisa y qué visita viene. El resto
+  // —silencios, etapas, resumen— es de la completa.
   const alerts =
-    pass === "quick" ? detected.filter((a) => a.kind === "newLeadUntouched") : detected
+    pass === "quick" ? detected.filter((a) => QUICK_KINDS.includes(a.kind)) : detected
   summary.alerts = alerts.length
 
   const sentKeys = options.repeat
@@ -167,17 +218,31 @@ export async function runLezgoIa(
 
   for (const delivery of deliveries) {
     const body = composeMessage({ delivery, voice: config.voice, test: Boolean(testContactId) })
-    let status: "sent" | "failed" | "simulated" = "simulated"
+    // "Canal de aviso" de quien lo recibe. Sin mensaje: se anota y cuenta
+    // como entregado, para no volver a anotarlo en cada corrida.
+    const channel = channelFor(config, delivery.recipient.id)
+    let status: RunSummary["messages"][number]["status"] =
+      channel === "log" ? "logged" : "simulated"
     let ghlMessageId: string | null = null
     let error: string | null = null
-    if (testContactId) {
+    if (testContactId && channel !== "log") {
       try {
-        // Un mensaje largo sale en partes: GoGHL rompe los que pasan de ~940
-        // caracteres. Si una parte falla, el aviso queda `failed` y se
-        // reintenta entero en la siguiente corrida.
-        for (const part of splitMessage(body)) {
-          const { messageId } = await sendWhatsApp(testContactId, part)
-          ghlMessageId ??= messageId
+        if (channel === "email") {
+          const n = delivery.alerts.length
+          const { messageId } = await sendEmail(
+            testContactId,
+            `Lezgo IA · ${account.name}: ${n} ${n === 1 ? "aviso" : "avisos"}`,
+            emailHtml(body),
+          )
+          ghlMessageId = messageId
+        } else {
+          // Un mensaje largo sale en partes: GoGHL rompe los que pasan de ~940
+          // caracteres. Si una parte falla, el aviso queda `failed` y se
+          // reintenta entero en la siguiente corrida.
+          for (const part of splitMessage(body)) {
+            const { messageId } = await sendWhatsApp(testContactId, part)
+            ghlMessageId ??= messageId
+          }
         }
         status = "sent"
       } catch (e) {
@@ -191,6 +256,7 @@ export async function runLezgoIa(
     summary.messages.push({
       recipient: recipient.role === "gerente" ? "Gerente" : recipient.name,
       alerts: delivery.alerts.length,
+      channel,
       status,
       ...(error ? { error } : {}),
     })
@@ -229,6 +295,9 @@ export async function runLezgoIa(
         alerts: summary.alerts,
         messages: summary.messages.length,
         held: summary.held,
+        watchDays: summary.watchDays,
+        totalOpen: summary.totalOpen,
+        visits: summary.visits,
       }),
     })
   } catch (error) {
@@ -243,13 +312,6 @@ export async function runLezgoIa(
 type PacedReader = ReturnType<typeof createPacedReader>
 
 const DAY_MS = 24 * 3_600_000
-
-/** "11-08-2026": el formato que pide `date` en la búsqueda de GHL. */
-function ghlDate(at: Date) {
-  const mm = String(at.getUTCMonth() + 1).padStart(2, "0")
-  const dd = String(at.getUTCDate()).padStart(2, "0")
-  return `${mm}-${dd}-${at.getUTCFullYear()}`
-}
 
 /**
  * Las oportunidades abiertas, de la más nueva a la más vieja (el orden por
@@ -284,7 +346,7 @@ async function readOpportunities(
   }
   if (since) {
     const fresh = all.filter((o) => o.createdAt && Date.parse(o.createdAt) >= since.getTime())
-    // En la rápida el total de GHL es el de su filtro por día, no el de la subcuenta.
+    // Con `since` el total de GHL es el de su filtro por día, no el de la subcuenta.
     return { opportunities: fresh, total: fresh.length, truncated: total > all.length }
   }
   return { opportunities: all, total, truncated: total > all.length }
@@ -295,12 +357,17 @@ async function readOpportunities(
  * de menos de un día, si alguien ya les escribió. Un mensaje de salida
  * cuenta como contacto venga de quien venga —asesor, bot o workflow—: GHL
  * no distingue al bot de una persona en el mensaje.
+ *
+ * Con `hot`, cuando lo último del hilo es del lead y tiene menos de un día,
+ * lee sus mensajes para saber qué escribió y cuánto tardó en contestar. Es
+ * una llamada más solo para esos: los que están esperando respuesta hoy.
  */
 async function withConversations(
   client: GhlClient,
   locationId: string,
   opportunities: GhlOpportunity[],
   paced: PacedReader,
+  options: { hot: boolean },
 ): Promise<EngineOpportunity[]> {
   const now = Date.now()
   return mapLimit(opportunities, CONCURRENCY, async (opp) => {
@@ -330,8 +397,22 @@ async function withConversations(
       }
     }
 
+    // Los mensajes se leen una sola vez aunque los pidan las dos reglas.
+    let loaded: GhlMessage[] | null = null
+    const messagesOf = async (conversationId: string) =>
+      (loaded ??= (await paced(() => client.listMessages(conversationId, 50))).messages.messages)
+
+    if (
+      options.hot &&
+      conv &&
+      base.conversation?.lastDirection === "inbound" &&
+      now - Date.parse(base.conversation.lastMessageAt) < DAY_MS
+    ) {
+      base.conversation.reply = leadReply(await messagesOf(conv.id))
+    }
+
     const created = Date.parse(base.createdAt)
-    if (now - created >= 24 * 3_600_000) return base
+    if (now - created >= DAY_MS) return base
     if (!conv) {
       base.firstContactAt = null
     } else if (
@@ -340,8 +421,7 @@ async function withConversations(
     ) {
       base.firstContactAt = base.conversation.lastMessageAt
     } else {
-      const { messages } = await paced(() => client.listMessages(conv.id, 50))
-      const first = messages.messages
+      const first = (await messagesOf(conv.id))
         .filter(
           (m) =>
             m.direction === "outbound" &&
@@ -353,4 +433,57 @@ async function withConversations(
     }
     return base
   })
+}
+
+/** Estados de una cita que ya no van a ocurrir. */
+const DEAD_VISIT = new Set(["cancelled", "noshow", "invalid"])
+
+/**
+ * Las citas que empiezan en las próximas 25 h, de todos los calendarios
+ * activos de la subcuenta (GHL las da por calendario, no por subcuenta). El
+ * nombre del lead sale de las oportunidades ya leídas: la cita solo trae el
+ * id del contacto, y casi siempre su título ya lo nombra.
+ */
+async function readAppointments(
+  client: GhlClient,
+  locationId: string,
+  paced: PacedReader,
+  opportunities: EngineOpportunity[],
+): Promise<EngineAppointment[]> {
+  const now = Date.now()
+  const { calendars } = await paced(() => client.listCalendars(locationId))
+  const pages = await mapLimit(
+    calendars.filter((c) => c.isActive !== false),
+    CONCURRENCY,
+    (calendar) =>
+      paced(() =>
+        client.listCalendarEvents({
+          locationId,
+          calendarId: calendar.id,
+          startTime: now,
+          endTime: now + VISIT_HORIZON_MS,
+        }),
+      ),
+  )
+  const leadName = new Map(
+    opportunities.flatMap((o) => (o.contactId ? [[o.contactId, o.contactName] as const] : [])),
+  )
+  const seen = new Set<string>()
+  return pages
+    .flatMap((page) => page.events ?? [])
+    .filter((event) => {
+      if (event.deleted || DEAD_VISIT.has(event.appointmentStatus ?? "")) return false
+      if (seen.has(event.id)) return false
+      seen.add(event.id)
+      return true
+    })
+    .map((event) => ({
+      id: event.id,
+      title: event.title ?? "",
+      startTime: event.startTime,
+      assignedTo: event.assignedUserId || null,
+      leadName: (event.contactId && leadName.get(event.contactId)) || null,
+      address: event.address || null,
+    }))
+    .sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime))
 }

@@ -25,10 +25,10 @@ export type NotificationRow = {
   createdAt: string
 }
 
-const NOT_MESSAGES = new Set(["proposal", "action", "usage", "run"])
+const NOT_MESSAGES = new Set(["proposal", "action", "usage", "run", "webhook"])
 
 const deliveryStatus = (status: string): NonNullable<Thread["delivery"]>["status"] =>
-  status === "sent" || status === "failed" ? status : "simulated"
+  status === "sent" || status === "failed" || status === "logged" ? status : "simulated"
 
 /** Postgres devuelve "2026-09-23 18:02:49.32+00"; el panel compara ISO. */
 function iso(at: string) {
@@ -46,7 +46,7 @@ function subjectFor(kinds: string[]) {
 export function threadsFromNotifications(rows: NotificationRow[]): Thread[] {
   const groups = new Map<string, NotificationRow[]>()
   for (const row of rows) {
-    // Propuestas, acciones, gasto y marcas de corrida no son mensajes.
+    // Propuestas, acciones, gasto, marcas de corrida y de webhook no son mensajes.
     if (NOT_MESSAGES.has(row.kind)) continue
     const key = `${row.runId}:${row.recipient}`
     const group = groups.get(key)

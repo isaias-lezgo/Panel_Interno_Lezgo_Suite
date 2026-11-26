@@ -3,7 +3,7 @@ import "server-only"
 import { getLezgoIaData, getLezgoIaLastRuns } from "@/lib/repository"
 
 import { runLezgoIa, type RunResult } from "./run"
-import { dueLocations, MIN_GAP_MS, type Pass } from "./schedule"
+import { dueLocations, fullGapMs, QUICK_GAP_MS, type Pass } from "./schedule"
 
 /**
  * Una corrida programada del motor sobre las subcuentas con la IA activa,
@@ -14,7 +14,9 @@ import { dueLocations, MIN_GAP_MS, type Pass } from "./schedule"
  * minuto en la pasada completa—, así que se reparte: corre primero la que
  * lleva más tiempo sin revisarse y, cuando el presupuesto se acaba, las que
  * faltan quedan en `pending`. La siguiente llamada sigue con esas, porque
- * las que ya pasaron quedan fuera hasta que venza su hueco (`MIN_GAP_MS`).
+ * las que ya pasaron quedan fuera hasta que venza su hueco: 4 minutos en
+ * la rápida y, en la completa, lo que diga "Análisis de la cartera" de cada
+ * subcuenta (`fullGapMs`). Con ese ajuste apagado la completa no le toca.
  * Lo que una corrida no alcanzó a mandar no se pierde: no queda anotado
  * como enviado.
  */
@@ -33,7 +35,10 @@ export async function runAllActive(options: {
   const active = data.subaccounts.filter((s) => s.status === "active")
   const due = dueLocations(active, await getLezgoIaLastRuns(options.pass), {
     now: started,
-    minGapMs: MIN_GAP_MS[options.pass],
+    minGapMs:
+      options.pass === "quick"
+        ? QUICK_GAP_MS
+        : (account) => fullGapMs(account.settings.analysisFrequency),
   })
 
   const runs: { location: string; result: RunResult }[] = []
@@ -57,7 +62,7 @@ export async function runAllActive(options: {
     ok: true as const,
     pass: options.pass,
     active: active.length,
-    /** Activas que no tocaban todavía: corrieron hace poco. */
+    /** Activas que no tocaban: corrieron hace poco o tienen el análisis apagado. */
     recent: active.length - due.length,
     runs,
     pending,

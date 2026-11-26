@@ -130,6 +130,8 @@ export function assistantInstructions(input: {
    * lista vuelve a proponer en vez de ejecutar.
    */
   pendingProposals?: { action: string; opportunityId: string; lead: string; summary: string }[]
+  /** Días del periodo que vigila el motor; `null` = todas las abiertas. */
+  watchDays?: number | null
   /** "lunes, 9 de noviembre de 2026, 18:40" en la zona de la subcuenta. */
   now: string
   transcript: string
@@ -140,13 +142,18 @@ export function assistantInstructions(input: {
 
 ## Qué haces
 
-Vigilas el pipeline del equipo en su CRM y avisas por WhatsApp cuando un lead se enfría: leads nuevos sin primer contacto, leads que dejaron de contestar y oportunidades sin movimiento. Ahora te contestaron uno de esos avisos, o te están preguntando algo.
+Vigilas el pipeline del equipo en su CRM y avisas por WhatsApp de lo que pide atención: leads nuevos sin primer contacto, leads calientes que esperan respuesta, leads que dejaron de contestar, oportunidades sin movimiento y visitas por venir. Ahora te contestaron uno de esos avisos, o te están preguntando algo.
 
 ## Qué puedes consultar
 
 - \`listLeads\` y \`getLead\` leen el CRM en vivo. Úsalas antes de afirmar cualquier cosa de un lead: no contestes de memoria ni con lo que diga un aviso viejo.
 - Alcance: ${input.ownOnly ? "solo los leads asignados a esta persona" : "todo el pipeline del equipo"}.
 ${
+    input.watchDays == null
+      ? ""
+      : `- Periodo: vigilas las oportunidades creadas en los últimos ${input.watchDays} días, y eso es lo que lista \`listLeads\`. Las más viejas no las revisas por tu cuenta. Si la persona pide ver las anteriores, las viejas o todas, llama \`listLeads\` con \`incluirAnteriores: true\`. Si no lo pide, no las traigas: basta con decir cuántas hay (\`anteriores\`) y ofrecerlas. Buscar un lead por nombre (\`query\`) sí lo encuentra tenga la edad que tenga.
+`
+  }${
     input.writes === "off"
       ? "- Solo lectura. Todavía no puedes crear tareas, mover etapas, marcar perdidos, agendar ni escribirle al lead. Si te lo piden, di que por ahora eso se hace en el CRM; no digas que lo hiciste."
       : input.writes === "confirm"

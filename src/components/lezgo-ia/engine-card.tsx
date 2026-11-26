@@ -51,7 +51,7 @@ export function EngineCard({
         r.inactive
           ? "La IA de esta subcuenta no está activa"
           : r.mode === "prueba"
-            ? `${sent} ${sent === 1 ? "mensaje mandado" : "mensajes mandados"} al número de pruebas`
+            ? `${sent} ${sent === 1 ? "mensaje mandado" : "mensajes mandados"} al contacto de pruebas`
             : "Corrida simulada: no se mandó nada",
       )
     })
@@ -65,7 +65,7 @@ export function EngineCard({
   return (
     <Instrument
       label="Motor"
-      hint="Revisa el pipeline con la configuración guardada y manda los avisos por WhatsApp"
+      hint="Revisa el pipeline con la configuración guardada y manda los avisos por el canal de cada persona"
       action={
         <Button size="sm" onClick={run} disabled={running || disabledReason !== null}>
           <PlayIcon aria-hidden /> {running ? "Corriendo…" : "Correr motor ahora"}
@@ -111,8 +111,14 @@ function RunResultView({ result }: { result: RunSummary }) {
         </StatusChip>
         <span className="num text-xs text-muted-foreground">
           {result.opportunities} oportunidades abiertas
-          {result.truncated && " (se leyeron las primeras)"} · {result.alerts} avisos
-          detectados
+          {result.watchDays !== null &&
+            ` de ${result.watchDays === 1 ? "el último día" : `los últimos ${result.watchDays} días`}`}
+          {result.truncated && " (se leyeron las más recientes)"}
+          {result.totalOpen > result.opportunities && ` de ${result.totalOpen} en total`}
+          {result.visits !== null &&
+            ` · ${result.visits} ${result.visits === 1 ? "cita" : "citas"} en 25 h`}
+          {" · "}
+          {result.alerts} avisos detectados
         </span>
       </div>
 
@@ -123,9 +129,18 @@ function RunResultView({ result }: { result: RunSummary }) {
               <StatusChip
                 tone={m.status === "sent" ? "live" : m.status === "failed" ? "risk" : "idle"}
               >
-                {m.status === "sent" ? "Mandado" : m.status === "failed" ? "Falló" : "Simulado"}
+                {m.status === "sent"
+                  ? "Mandado"
+                  : m.status === "failed"
+                    ? "Falló"
+                    : m.status === "logged"
+                      ? "Solo bitácora"
+                      : "Simulado"}
               </StatusChip>
               <span>{m.recipient}</span>
+              {m.channel === "email" && (
+                <span className="text-xs text-muted-foreground">por correo</span>
+              )}
               <span className="num text-xs text-muted-foreground">
                 {m.alerts} {m.alerts === 1 ? "aviso" : "avisos"}
               </span>

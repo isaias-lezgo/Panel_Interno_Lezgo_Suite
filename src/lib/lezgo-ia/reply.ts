@@ -20,6 +20,7 @@ import { assistantInstructions, leadScope, pendingQuestion, transcript } from ".
 import { assistantTools } from "./assistant-tools"
 import { resolveAdvisor } from "./config"
 import { splitMessage } from "./engine"
+import { watchDays } from "./window"
 
 /**
  * El asistente de Lezgo IA contesta lo que un asesor escribe por WhatsApp.
@@ -145,9 +146,40 @@ async function recordUsage(
   }
 }
 
+/**
+ * Deja en Neon con qué entró el webhook de esta pregunta: la firma de GHL,
+ * el secreto de la URL o los dos. Los logs de Vercel en plan Hobby duran una
+ * hora; este renglón es la prueba de que la firma sola ya basta para quitar
+ * el secreto de la URL. Si no se puede anotar, la respuesta sale igual.
+ */
+async function recordWebhookAuth(
+  common: Parameters<typeof recordUsage>[0],
+  questionId: string,
+  auth: WebhookAuth,
+) {
+  try {
+    await db!
+      .insert(schema.lezgoIaNotifications)
+      .values({
+        ...common,
+        id: `ln_wh_${questionId}`,
+        key: "webhook:auth",
+        kind: "webhook",
+        status: auth.signature ? "signed" : "unsigned",
+        body: JSON.stringify(auth),
+      })
+      .onConflictDoNothing()
+  } catch (error) {
+    console.error("No se anotó la firma del webhook de Lezgo IA", error)
+  }
+}
+
+/** Con qué se autenticó el webhook que trajo el mensaje. */
+export type WebhookAuth = { signature: boolean; secret: boolean }
+
 export async function answerInbound(
   contactId: string,
-  options: { simulate?: boolean } = {},
+  options: { simulate?: boolean; auth?: WebhookAuth } = {},
 ): Promise<ReplyResult> {
   const simulate = options.simulate === true
   const testContactId = process.env.LEZGO_IA_TEST_CONTACT_ID || null
@@ -205,6 +237,7 @@ export async function answerInbound(
       .onConflictDoNothing()
       .returning({ id: schema.lezgoIaNotifications.id })
     if (claimed.length === 0) return ignored("Esa pregunta ya se contestó.")
+    if (options.auth) await recordWebhookAuth(common, question.id, options.auth)
   }
 
   const advisor = account.advisors.find((a) => a.id === last.recipient) ?? null
@@ -235,6 +268,7 @@ export async function answerInbound(
         ownOnly: scope.assignedTo !== null,
         writes,
         pendingProposals,
+        watchDays: watchDays(config.settings),
         now: now.toLocaleString("es-MX", {
           timeZone: config.timezone,
           weekday: "long",
@@ -259,6 +293,7 @@ export async function answerInbound(
         pipelineName: new Map(account.pipelines.map((p) => [p.id, p.name])),
         advisorName: new Map(account.advisors.map((a) => [a.id, a.name])),
         now,
+        watchDays: watchDays(config.settings),
         writes:
           writes === "off"
             ? null
