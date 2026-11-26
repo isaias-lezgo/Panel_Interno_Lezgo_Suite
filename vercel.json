@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "lezgo-ia-rapida": {
+      "schedule": "*/10 * * * *",
+      "path": "/api/lezgo-ia/cron/rapida",
+      "requestMethod": "GET"
+    },
+    "lezgo-ia-completa": {
+      "schedule": "5 * * * *",
+      "path": "/api/lezgo-ia/cron",
+      "requestMethod": "GET"
+    }
+  }
+}

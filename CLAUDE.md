@@ -452,10 +452,12 @@ acciones prendidas solo en la subcuenta propia
   asistente contestaría cualquier cosa que ese cliente escriba ahí.
 - Con ese número: ligar el teléfono de cada asesor a su usuario y abrir la
   entrega por subcuenta.
-- Programar el cron (Make o Vercel Pro): la ruta y sus dos pasadas ya
-  están; falta `CRON_SECRET` en Vercel y quien la llame.
+- Repartir el motor en paralelo antes de activar muchas subcuentas: hoy
+  corren una tras otra y solo está activa la propia. Antes hace falta un
+  candado por subcuenta (dos corridas encimadas repiten avisos), una cola
+  única de salida de WhatsApp y un tope global de llamadas a GHL.
 - Confirmar que la firma de GHL sola abre el webhook, para quitar el
-  secreto de la URL. Los logs de Vercel en Hobby duran una hora, así que
+  secreto de la URL. Los logs de Vercel duran poco, así que
   cada pregunta contestada deja un renglón `webhook` en
   `lezgo_ia_notifications` (`status` `signed` o `unsigned`): basta un mensaje
   desde el número de pruebas y leer ese renglón.
@@ -464,16 +466,20 @@ acciones prendidas solo en la subcuenta propia
 
 **Cron de Lezgo IA.** `/api/lezgo-ia/cron` corre el motor en las
 subcuentas activas a las que les toca; entra con `Authorization: Bearer
-$CRON_SECRET`. **Nadie la llama todavía**: no hay `vercel.json` ni
-`CRON_SECRET` en Vercel. La puede programar un escenario de Make (un módulo
-HTTP con ese header) o, con plan Pro, el cron de Vercel; en Hobby el cron
-solo corre una vez al día. Tiene dos pasadas
-(`src/lib/lezgo-ia/schedule.ts`):
-- `?pasada=rapida`: solo oportunidades creadas en el último día, y de ahí
-  lead nuevo sin primer contacto, lead caliente y visita por venir. Para
-  cada 5 o 10 minutos.
-- `?pasada=completa` (o nada): todo lo demás. Llámala cada hora: a cada
-  subcuenta le toca según su "Análisis de la cartera".
+$CRON_SECRET`. La llaman dos programaciones de Vercel (Schedules, plan
+Pro) declaradas en `vercel.json`, desde el 25 de noviembre de 2026; Vercel
+manda el header solo, con el `CRON_SECRET` que había **al construir**:
+cambiarlo pide volver a publicar. Las dos rutas comparten
+`src/lib/lezgo-ia/cron-request.ts` y las dos están fuera del candado. No
+cambies el nombre de una programación: renombrarla borra su historial. Para
+pausarlas, `vercel schedules disable <nombre>` o el panel de Vercel. Tiene
+dos pasadas (`src/lib/lezgo-ia/schedule.ts`):
+- `lezgo-ia-rapida`, cada 10 minutos, a `/api/lezgo-ia/cron/rapida`: solo
+  oportunidades creadas en el último día, y de ahí lead nuevo sin primer
+  contacto, lead caliente y visita por venir. Tiene ruta propia porque la
+  documentación no dice si el `path` de una programación acepta `?pasada=`.
+- `lezgo-ia-completa`, cada hora al minuto 5, a `/api/lezgo-ia/cron`: todo
+  lo demás. A cada subcuenta le toca según su "Análisis de la cartera".
 No caben todas las subcuentas en una llamada, así que se reparte
 (`run-all.ts`): primero la que lleva más tiempo sin revisarse, y las que no
 alcanzan vuelven en `pending` para la siguiente llamada. Cada corrida deja
@@ -569,14 +575,14 @@ devuelven un error explicado en la interfaz.
 | `LEZGO_IA_TEST_CONTACT_ID` | Contacto de Lezgo Suite al que llegan todos los avisos del motor en pruebas. Vacía = simulado |
 | `LEZGO_IA_WEBHOOK_SECRET` | Secreto alterno del webhook de mensajes entrantes (`x-lezgo-ia-secret` o `?secreto=`) y el único que abre `?simular=1`. Vacía = solo entra la firma de GHL |
 | `LEZGO_IA_WRITE_ACTIONS` | Deja al asistente crear tareas y marcar perdidos: `interna` solo en la subcuenta Lezgo Suite, `1` en todas. Vacía = solo lectura |
-| `CRON_SECRET` | Secreto de `/api/lezgo-ia/cron`: lo manda quien programe el motor (Make o el cron de Vercel). Vacía = la ruta no corre nada |
+| `CRON_SECRET` | Secreto de las rutas del cron de Lezgo IA: lo mandan las programaciones de Vercel. Vacía = la ruta no corre nada |
 | `PANEL_USER` / `PANEL_PASSWORD` | Candado del panel (`/entrar` + cookie). Sin contraseña en local no pide login |
 
 ## Cuidados
 
 - **No tocar otros proyectos de Vercel o Neon.** Este repo está enlazado al
   proyecto de Vercel `panel-interno-lezgo-suite` (equipo
-  `isaias-rios-projects`, plan Hobby) y **cada push a `main` publica a
+  `isaias-rios-projects`, plan Pro) y **cada push a `main` publica a
   producción** en `panel-interno-lezgo-suite.vercel.app`. Producción usa la
   misma base de Neon que local. Al conectar Neon, usa una rama nueva y
   exclusiva.
@@ -586,8 +592,8 @@ devuelven un error explicado en la interfaz.
   contraseña: cambiarla cierra todas las sesiones. Sin sesión, las páginas
   redirigen a `/entrar?next=` y las APIs responden 401. La única excepción es
   el `POST` a `/api/lezgo-ia/entrada`, el webhook de GHL, que exige la firma
-  de GHL o `LEZGO_IA_WEBHOOK_SECRET`, y el `GET` a `/api/lezgo-ia/cron`, que
-  exige `CRON_SECRET`. En producción, sin `PANEL_PASSWORD` no
+  de GHL o `LEZGO_IA_WEBHOOK_SECRET`, y el `GET` a `/api/lezgo-ia/cron` y a
+  `/api/lezgo-ia/cron/rapida`, que exigen `CRON_SECRET`. En producción, sin `PANEL_PASSWORD` no
   entra nadie. La protección de Vercel del proyecto es la estándar, que **no**
   cubre el dominio de producción: el candado es lo único que lo cierra. No lo
   quites ni lo relajes sin reemplazo.
